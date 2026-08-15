@@ -7,6 +7,7 @@
 #include "qemu/osdep.h"
 #include "hw/pci/pci_device.h"
 #include "hw/pci/pci.h"
+#include "hw/qdev-properties.h"
 #include "qapi/error.h"
 #include "qom/object.h"
 
@@ -149,6 +150,10 @@ static const TypeInfo gfxati_info = {
 	.parent = TYPE_PCI_DEVICE,
 	.instance_size = sizeof(GfxAtiCard),
 	.class_init = gfxati_class_init,
+	.interfaces = (InterfaceInfo[]) {
+		{ INTERFACE_CONVENTIONAL_PCI_DEVICE },
+		{ },
+	},
 };
 
 static void gfxati_register_types(void)

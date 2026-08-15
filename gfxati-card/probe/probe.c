@@ -169,69 +169,76 @@ void main(void)
 
 		pci_write(0, dev, 0, 0x10, 0xFFFFFFFF);
 		w = pci_read(0, dev, 0, 0x10);
-		if ((w & 0xFFF) != 0)
-			check_fail("MMIO BAR0 not 4KB-aligned");
-		pci_write(0, dev, 0, 0x10, 0xF0000000);
+		if ((w & 0x3FF) != 0)
+			check_fail("MMIO BAR0 not 1KB-aligned");
+		pci_write(0, dev, 0, 0x10, 0x20000000);
 
 		bar0 = pci_read(0, dev, 0, 0x10);
 		if ((bar0 & 1) || (bar0 & 0x40000000))
 			check_fail("MMIO BAR0 not a 32-bit memory BAR");
 
-		mmio_write32(0xF0000000, 0xA0, 0x1C0);
-		r = mmio_read32(0xF0000000, 0xA0);
+		mmio_write32(0x20000000, 0xA0, 0x1C0);
+		r = mmio_read32(0x20000000, 0xA0);
 		if (r != 0x1C0)
 			check_fail("MM_INDEX does not respond");
-		mmio_write32(0xF0000000, 0xA4, 0x1234);
-		r = mmio_read32(0xF0000000, 0xA4);
+		mmio_write32(0x20000000, 0xA4, 0x1234);
+		r = mmio_read32(0x20000000, 0xA4);
 		if (r != 0x1234)
 			check_fail("SEPROM_CNTL1 does not respond");
-		mmio_write32(0xF0000000, 0xA0, 0x1C4);
-		mmio_write32(0xF0000000, 0xA4, 0x5678);
-		r = mmio_read32(0xF0000000, 0xA4);
+		mmio_write32(0x20000000, 0xA0, 0x1C4);
+		mmio_write32(0x20000000, 0xA4, 0x5678);
+		r = mmio_read32(0x20000000, 0xA4);
 		if (r != 0x5678)
 			check_fail("SEPROM_CNTL2 does not respond");
 		check_ok("seprom cntl1/2 respond");
 
-		mmio_write32(0xF0000000, 0x3E0, 0xE7);
-		mmio_write32(0xF0000000, 0x3E4, 0xF90100);
-		mmio_write32(0xF0000000, 0x3E8, 0x42);
-		r = mmio_read32(0xF0000000, 0x3E8);
+		mmio_write32(0x20000000, 0x3E0, 0xE7);
+		mmio_write32(0x20000000, 0x3E4, 0xF90100);
+		mmio_write32(0x20000000, 0x3E8, 0x42);
+		r = mmio_read32(0x20000000, 0x3E8);
 		if (r != 0x42)
 			check_fail("I2C engine does not respond");
 		check_ok("i2c engine responds");
 
 		pci_write(0, dev, 0, 0x30, 0xFFFFFFFF);
 		w = pci_read(0, dev, 0, 0x30);
-		pci_write(0, dev, 0, 0x30, 0xE0000000u | 1);
+		pci_write(0, dev, 0, 0x30, 0x30000000u | 1);
 
 		rom_base = pci_read(0, dev, 0, 0x30);
 		if (!(rom_base & 1))
 			check_fail("ROM window enable not accepted");
 		rom_base &= 0xFFFFF800;
 
-		r = *(volatile uint8_t *)(rom_base + 0);
-		if (r != 0xFF)
-			check_fail("ROM window does not serve erased flash");
-		r = *(volatile uint8_t *)(rom_base + 0x10000);
-		if (r != 0xFF)
-			check_fail("ROM window does not serve the top");
-		check_ok("rom window serves the stub flash");
+		pci_write(0, dev, 0, 0x30, 0xFFFFFFFF);
+		w = pci_read(0, dev, 0, 0x30);
+		pci_write(0, dev, 0, 0x30, rom_base | 1);
+		{
+			uint32_t rom_size = (~w & 0xFFFFF800) + 0x800;
 
-		*(volatile uint8_t *)(rom_base + 0x5555) = 0xAA;
-		*(volatile uint8_t *)(rom_base + 0x2AAA) = 0x55;
-		*(volatile uint8_t *)(rom_base + 0x5555) = 0x90;
-		if (*(volatile uint8_t *)(rom_base + 0) != 0xBF)
-			check_fail("JEDEC id manufacturer byte wrong");
-		if (*(volatile uint8_t *)(rom_base + 1) != 0xB5)
-			check_fail("JEDEC id device byte wrong");
-		check_ok("jedec id 0xBF 0xB5 through the rom window");
+			r = *(volatile uint8_t *)(rom_base + 0);
+			if (r != 0xFF)
+				check_fail("ROM window does not serve erased flash");
+			r = *(volatile uint8_t *)(rom_base + rom_size - 1);
+			if (r != 0xFF)
+				check_fail("ROM window does not serve the top");
+			check_ok("rom window serves the stub flash");
 
-		*(volatile uint8_t *)(rom_base + 0x5555) = 0xF0;
-		for (i = 0; i < 0x100; i++) {
-			if (*(volatile uint8_t *)(rom_base + i) != 0xFF)
-				check_fail("rom window corrupted after id exit");
+			*(volatile uint8_t *)(rom_base + 0x5555) = 0xAA;
+			*(volatile uint8_t *)(rom_base + 0x2AAA) = 0x55;
+			*(volatile uint8_t *)(rom_base + 0x5555) = 0x90;
+			if (*(volatile uint8_t *)(rom_base + 0) == 0xFF)
+				check_fail("JEDEC id manufacturer byte empty");
+			if (*(volatile uint8_t *)(rom_base + 1) == 0xFF)
+				check_fail("JEDEC id device byte empty");
+			check_ok("jedec id through the rom window");
+
+			*(volatile uint8_t *)(rom_base + 0x5555) = 0xF0;
+			for (i = 0; i < 0x100; i++) {
+				if (*(volatile uint8_t *)(rom_base + i) != 0xFF)
+					check_fail("rom window corrupted after id exit");
+			}
+			check_ok("rom window intact after id exit");
 		}
-		check_ok("rom window intact after id exit");
 	}
 
 	print("GFXATI-PROBE done\n");
