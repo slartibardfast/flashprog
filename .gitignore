@@ -24,3 +24,5 @@
 /gfxati_flash_TTrace_*
 /gfxati-flash-test
 /states/
+/gfxati-card/gfxati_card_test
+/gfxati-card/probe/probe.elf

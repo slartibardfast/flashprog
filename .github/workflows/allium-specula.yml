@@ -20,6 +20,20 @@ jobs:
             gfxati-flash/gfxati-flash.c gfxati-flash/gfxati-flash-test.c
           ./gfxati-flash/gfxati-flash-test
 
+      - name: Build and self-test the gfxati card device
+        run: |
+          cc -Wall -Wextra -o gfxati-card/gfxati_card_test \
+            gfxati-flash/gfxati-flash.c gfxati-card/gfxati_card.c \
+            gfxati-card/gfxati_card_test.c
+          ./gfxati-card/gfxati_card_test
+
+      - name: Build the probe kernel (boot attestation)
+        run: |
+          sudo apt-get update && sudo apt-get install -y gcc-multilib
+          gcc -m32 -ffreestanding -nostdlib -static -fno-stack-protector \
+            -Wl,-e,main -T gfxati-card/probe/probe.lds \
+            -o probe.elf gfxati-card/probe/probe.c
+
       - name: Install the allium CLI (pinned)
         run: cargo install allium-cli --version 3.5.3 --locked
 
