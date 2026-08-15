@@ -36,6 +36,10 @@ LITE_PART_LBA = 63
 def prep(boot, atiflash, vbios, cwsdpmi, out):
     img = fat12.Fat12Image(open(boot, 'rb').read(),
                            offset=LITE_PART_LBA * 512)
+    cfg = img.read_file('FDCONFIG.SYS')
+    if cfg and b'/P=\\FDAUTO.BAT' in cfg and b'/N' not in cfg:
+        img.write_file('FDCONFIG.SYS', cfg.replace(b'/P=\\FDAUTO.BAT',
+                                                   b'/P=\\FDAUTO.BAT /N'))
     img.write_file('FDAUTO.BAT', AUTOEXEC.encode())
     img.write_file('CWSDPMI.EXE', open(cwsdpmi, 'rb').read())
     img.write_file('ATIFLASH.EXE', open(atiflash, 'rb').read())

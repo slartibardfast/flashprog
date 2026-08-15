@@ -18,3 +18,17 @@ DPMI/console layer of the 2006-era binary under 2026 FreeDOS on TCG, so
 the rig attestation is blocked. Options being weighed: DOSBox-X/DOSEMU as
 the DOS host, a different DPMI configuration, or a 4.x atiflash build.
 The card device's own attestation (the probe kernel) is green regardless.
+
+### Root cause of the guest crash (2026-08-15)
+
+The "Invalid Opcode at ..." crash seen when running atiflash or CWSDPMI was
+FreeCom 0.86's XMS swap colliding with resident DPMI hosts: the shell swaps
+its transient to XMS, the TSR loads into the freed low memory, and the
+shell's swap-in executes the TSR's code (a VCPI stub) as its own - the
+stub's `pop bp; mov ax,0xde0b; int 67; ret` returns through a stack value
+into data -> #UD. The XMS machinery itself round-trips correctly under TCG
+(verified with a hand-written XMS alloc/move/readback test COM:
+XMS-ROUNDTRIP-OK), so this is a guest-side interaction, not a QEMU bug.
+rig.py's prep now adds FreeCom's `/N` swap-disable switch to the SHELL=
+line in FDCONFIG.SYS, which eliminates the TSR crash (verified: CWSDPMI
+loads and runs clean with the fix).
