@@ -1,0 +1,47 @@
+name: gfxati spec lanes
+
+on:
+  push:
+    branches: [gfxati-flash]
+  pull_request:
+    paths:
+      - gfxati-flash/**
+      - .github/workflows/allium-specula.yml
+
+jobs:
+  gfxati:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and self-test the flash model
+        run: |
+          cc -Wall -Wextra -o gfxati-flash/gfxati-flash-test \
+            gfxati-flash/gfxati-flash.c gfxati-flash/gfxati-flash-test.c
+          ./gfxati-flash/gfxati-flash-test
+
+      - name: Install the allium CLI (pinned)
+        run: cargo install allium-cli --version 3.5.3 --locked
+
+      - name: allium check, analyse, plan
+        run: |
+          allium check gfxati-flash/gfxati-flash.allium
+          allium analyse gfxati-flash/gfxati-flash.allium
+          allium plan gfxati-flash/gfxati-flash.allium
+
+      - name: Install host-lifecycle (pinned)
+        run: |
+          cargo install host-lifecycle \
+            --git https://github.com/connollydavid/host-lifecycle \
+            --rev 66c24d6de0833b8bafc58c5c875ab23b9303c47a --locked
+
+      - name: Obligations discharged by the self-test
+        run: |
+          host-lifecycle obligations gfxati-flash/gfxati-flash.allium \
+            --tests gfxati-flash --strict-discharge
+
+      - name: Model-check the timing spec with TLC
+        run: |
+          curl -sS -o tla2tools.jar https://nightly.tlapl.us/dist/tla2tools.jar
+          java -XX:+UseParallelGC -Xmx4G -jar tla2tools.jar \
+            -config gfxati-flash/gfxati_flash.cfg gfxati-flash/gfxati_flash.tla
