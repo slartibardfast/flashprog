@@ -1,0 +1,118 @@
+# gfxati-flash.obligations - disposition for every `allium plan` obligation.
+# `host-lifecycle obligations gfxati-flash.allium --tests . --strict-discharge`
+# checks this is complete (no obligation undispositioned, no stale entry, every
+# test: name real, every test: carrying an `exercises=` link to the symbol it drives).
+#   <id> => test:<name> exercises=<symbol> | structural | waived: <reason>
+# structural = the spec's own `allium check`/`analyse` lane discharges it.
+# exercises=<symbol> = the named test must call <symbol>, so the discharge is by
+# behaviour, not name-resolution.
+
+# --- Spec-integrity (covered by the check/analyse lane) ---
+enum-comparable.Bus                              => structural
+enum-comparable.IdScheme                         => structural
+enum-comparable.EraseOp                          => structural
+enum-comparable.Quirk                            => structural
+enum-comparable.ParEraseKind                     => structural
+entity-fields.Chip                               => structural
+entity-fields.Flash                              => structural
+entity-fields.CellProgram                        => structural
+entity-fields.RangeErase                         => structural
+entity-fields.BufferWrite                        => structural
+entity-fields.IdResponse                         => structural
+entity-fields.StatusResponse                     => structural
+config-default.erased_cell                       => structural
+surface-actor.SpiInterface                       => structural
+surface-exposure.SpiInterface                    => structural
+surface-provides.SpiInterface                    => structural
+surface-actor.ParallelInterface                  => structural
+surface-exposure.ParallelInterface               => structural
+surface-provides.ParallelInterface               => structural
+
+# --- Behavioural rules and invariants ---
+rule-success.WriteEnable                         => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.WriteEnable.1                       => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-success.WriteDisable                        => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.WriteDisable.1                      => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-success.StatusRead                          => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.StatusRead.1                        => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-entity-creation.StatusRead.1                => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-success.WrsrApplied                         => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.WrsrApplied.1                       => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.WrsrApplied.2                       => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-success.EwsrGatedWrsr                       => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.EwsrGatedWrsr.1                     => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.EwsrGatedWrsr.2                     => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-success.SpiProgramByteApplies               => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.SpiProgramByteApplies.1             => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.SpiProgramByteApplies.2             => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.SpiProgramByteApplies.3             => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-entity-creation.SpiProgramByteApplies.1     => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-success.SpiProgramComplete                  => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.SpiProgramComplete.1                => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-success.SpiErase                            => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.SpiErase.1                          => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.SpiErase.2                          => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.SpiErase.3                          => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.SpiErase.4                          => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-entity-creation.SpiErase.1                  => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-success.SpiChipErase                        => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.SpiChipErase.1                      => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.SpiChipErase.2                      => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.SpiChipErase.3                      => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-entity-creation.SpiChipErase.1              => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-success.AaiFirstWord                        => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.AaiFirstWord.1                      => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.AaiFirstWord.2                      => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.AaiFirstWord.3                      => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.AaiFirstWord.4                      => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-entity-creation.AaiFirstWord.1              => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-entity-creation.AaiFirstWord.2              => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-success.AaiNextWord                         => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.AaiNextWord.1                       => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.AaiNextWord.2                       => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.AaiNextWord.3                       => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-entity-creation.AaiNextWord.1               => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-entity-creation.AaiNextWord.2               => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-success.At45BufferWrite                     => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.At45BufferWrite.1                   => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.At45BufferWrite.2                   => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.At45BufferWrite.3                   => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-entity-creation.At45BufferWrite.1           => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-success.At45BufferToPage                    => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.At45BufferToPage.1                  => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.At45BufferToPage.2                  => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-entity-creation.At45BufferToPage.1          => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-success.At45PageErase                       => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.At45PageErase.1                     => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.At45PageErase.2                     => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.At45PageErase.3                     => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-entity-creation.At45PageErase.1             => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-success.At45BlockErase                      => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.At45BlockErase.1                    => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.At45BlockErase.2                    => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-failure.At45BlockErase.3                    => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-entity-creation.At45BlockErase.1            => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+rule-success.ParallelIdEnter                     => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-failure.ParallelIdEnter.1                   => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-success.ParallelIdExit                      => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-failure.ParallelIdExit.1                    => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-success.ParallelIdRead                      => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-failure.ParallelIdRead.1                    => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-failure.ParallelIdRead.2                    => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-failure.ParallelIdRead.3                    => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-entity-creation.ParallelIdRead.1            => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-success.ParallelProgramByte                 => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-failure.ParallelProgramByte.1               => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-failure.ParallelProgramByte.2               => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-entity-creation.ParallelProgramByte.1       => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-success.ParallelSectorErase                 => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-failure.ParallelSectorErase.1               => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-failure.ParallelSectorErase.2               => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-entity-creation.ParallelSectorErase.1       => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-success.ParallelChipErase                   => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-failure.ParallelChipErase.1                 => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+rule-entity-creation.ParallelChipErase.1         => test:test_parallel_chip exercises=gfxati_flash_parallel_write
+invariant.ProgramEventsWithinChip                => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+invariant.EraseEventsWithinChip                  => test:test_spi_chip exercises=gfxati_flash_spi_xfer
+invariant.IdResponsesMatchCatalog                => test:test_parallel_chip exercises=gfxati_flash_parallel_read
+invariant.StatusResponseIsLive                   => test:test_spi_chip exercises=gfxati_flash_spi_xfer

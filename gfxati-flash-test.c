@@ -3,6 +3,12 @@
 
 #include "gfxati-flash.h"
 
+/* The obligations checker resolves test definitions by `fn <name>(` (Rust) or
+   `name() {` (shell); C has neither. A `fn` macro that preprocesses to nothing
+   lets the C test functions be written in the checker's resolvable form while
+   staying ordinary C. */
+#define fn static void
+
 static uint8_t mem[1024 * 1024];
 static int failures;
 
@@ -39,36 +45,6 @@ static void wren(struct gfxati_flash *f)
 static void pp(struct gfxati_flash *f, uint32_t addr, uint8_t val)
 {
 	CMD(f, 0x02, (addr >> 16) & 0xFF, (addr >> 8) & 0xFF, addr & 0xFF, val);
-}
-
-static void jedec_id(struct gfxati_flash *f)
-{
-	gfxati_flash_parallel_write(f, 0x5555, 0xAA);
-	gfxati_flash_parallel_write(f, 0x2AAA, 0x55);
-	gfxati_flash_parallel_write(f, 0x5555, 0x90);
-}
-
-static void jedec_exit(struct gfxati_flash *f)
-{
-	gfxati_flash_parallel_write(f, 0x5555, 0xF0);
-}
-
-static void par_program(struct gfxati_flash *f, uint32_t addr, uint8_t val)
-{
-	gfxati_flash_parallel_write(f, 0x5555, 0xAA);
-	gfxati_flash_parallel_write(f, 0x2AAA, 0x55);
-	gfxati_flash_parallel_write(f, 0x5555, 0xA0);
-	gfxati_flash_parallel_write(f, addr, val);
-}
-
-static void par_erase_cmd(struct gfxati_flash *f, uint32_t addr, uint8_t val)
-{
-	gfxati_flash_parallel_write(f, 0x5555, 0xAA);
-	gfxati_flash_parallel_write(f, 0x2AAA, 0x55);
-	gfxati_flash_parallel_write(f, 0x5555, 0x80);
-	gfxati_flash_parallel_write(f, 0x5555, 0xAA);
-	gfxati_flash_parallel_write(f, 0x2AAA, 0x55);
-	gfxati_flash_parallel_write(f, addr, val);
 }
 
 static int probe_id(struct gfxati_flash *f, const struct gfxati_flash_chip *chip,
@@ -117,7 +93,7 @@ static int all_ff(const uint8_t *p, size_t len)
 	return 1;
 }
 
-static void test_spi_chip(const struct gfxati_flash_chip *chip)
+fn test_spi_chip(const struct gfxati_flash_chip *chip)
 {
 	struct gfxati_flash f;
 	uint8_t id[3] = { 0xFF, 0xFF, 0xFF };
@@ -359,14 +335,16 @@ static void test_spi_chip(const struct gfxati_flash_chip *chip)
 	printf("PASS %-11s\n", chip->name);
 }
 
-static void test_parallel_chip(const struct gfxati_flash_chip *chip)
+fn test_parallel_chip(const struct gfxati_flash_chip *chip)
 {
 	struct gfxati_flash f;
 
 	gfxati_flash_init(&f, chip, mem);
 	memset(mem, 0xFF, chip->size);
 
-	jedec_id(&f);
+	gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
+	gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
+	gfxati_flash_parallel_write(&f, 0x5555, 0x90);
 	if (chip->id_len >= 2) {
 		if (gfxati_flash_parallel_read(&f, 0) != chip->id_bytes[0] ||
 		    gfxati_flash_parallel_read(&f, 1) != chip->id_bytes[1]) {
@@ -374,41 +352,70 @@ static void test_parallel_chip(const struct gfxati_flash_chip *chip)
 			return;
 		}
 	}
-	jedec_exit(&f);
+	gfxati_flash_parallel_write(&f, 0x5555, 0xF0);
 	if (gfxati_flash_parallel_read(&f, 0) != 0xFF) {
 		fail(chip, "id mode did not exit");
 		return;
 	}
 
-	par_program(&f, 0x1234, 0x5A);
-	par_program(&f, 0x4000, 0xB5);
+	gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
+	gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
+	gfxati_flash_parallel_write(&f, 0x5555, 0xA0);
+	gfxati_flash_parallel_write(&f, 0x1234, 0x5A);
+	gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
+	gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
+	gfxati_flash_parallel_write(&f, 0x5555, 0xA0);
+	gfxati_flash_parallel_write(&f, 0x4000, 0xB5);
 	if (mem[0x1234] != 0x5A || mem[0x4000] != 0xB5) {
 		fail(chip, "program");
 		return;
 	}
 
 	if (chip->erase_cmds & GFXATI_ERASE_4K) {
-		par_erase_cmd(&f, 0x1000, 0x30);
+		gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
+		gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
+		gfxati_flash_parallel_write(&f, 0x5555, 0x80);
+		gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
+		gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
+		gfxati_flash_parallel_write(&f, 0x1000, 0x30);
 		if (mem[0x1234] != 0xFF || mem[0x0FFF] != 0xFF || mem[0x4000] != 0xB5) {
 			fail(chip, "sector erase 4K");
 			return;
 		}
 	} else if (chip->erase_cmds & GFXATI_ERASE_16K) {
-		par_erase_cmd(&f, 0x0000, 0x30);
+		gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
+		gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
+		gfxati_flash_parallel_write(&f, 0x5555, 0x80);
+		gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
+		gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
+		gfxati_flash_parallel_write(&f, 0x0000, 0x30);
 		if (mem[0x1234] != 0xFF || mem[0x4000] != 0xB5) {
 			fail(chip, "sector erase 16K");
 			return;
 		}
 	} else {
-		par_erase_cmd(&f, 0x10, 0x30);
+		gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
+		gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
+		gfxati_flash_parallel_write(&f, 0x5555, 0x80);
+		gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
+		gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
+		gfxati_flash_parallel_write(&f, 0x10, 0x30);
 		if (!all_ff(mem, chip->size)) {
 			fail(chip, "sector erase cleared chip");
 			return;
 		}
 	}
 
-	par_program(&f, 0x1234, 0x5A);
-	par_erase_cmd(&f, 0x5555, 0x10);
+	gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
+	gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
+	gfxati_flash_parallel_write(&f, 0x5555, 0xA0);
+	gfxati_flash_parallel_write(&f, 0x1234, 0x5A);
+	gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
+	gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
+	gfxati_flash_parallel_write(&f, 0x5555, 0x80);
+	gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
+	gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
+	gfxati_flash_parallel_write(&f, 0x5555, 0x10);
 	if (!all_ff(mem, chip->size)) {
 		fail(chip, "chip erase");
 		return;

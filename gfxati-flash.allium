@@ -1,0 +1,503 @@
+-- allium: 3
+-- gfxati-flash.allium
+
+-- Scope: the per-chip flash model behind the gfxati QEMU stub. The model is
+-- a byte-stream machine: the host (the stub device, later a real atiflash
+-- under QEMU) drives SPI commands and parallel JEDEC cycles against a chip
+-- instance, and the model answers with the chip's behaviour.
+-- Includes: the SPI command engine (probe, read, program, erase, status,
+-- AAI, the AT45 DataFlash buffer flow), the parallel JEDEC engine
+-- (unlock sequences, id mode, program mode, sector and chip erase), the
+-- catalog's erase geometries and per-chip opcode sets.
+-- Excludes: the QEMU PCI device and its register map (separate milestone
+-- task); host-side probing policy (which command sequence a probe runs is
+-- the caller's choice); timing (writes and erases complete instantly, so
+-- WIP is always clear; the timing contract lives in gfxati-flash.tla).
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+enum Bus { spi | parallel }
+
+enum IdScheme { rdid | at25f | res_only | jedec_parallel }
+
+enum EraseOp { se4k | be16k | be32k | be64k | d8k32 | chip }
+
+enum Quirk { aai | ewsr | at45 | fwh | no_rdid }
+
+enum ParEraseKind { sector | whole_chip }
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+entity Chip {
+    name: String
+    size: Integer
+    page_size: Integer
+    bus: Bus
+    id_scheme: IdScheme
+    id: List<Integer>
+    res_sig: Integer
+    erase_ops: Set<EraseOp>
+    quirks: Set<Quirk>
+}
+
+entity Flash {
+    chip: Chip
+    wren: Boolean
+    aai_active: Boolean
+    id_mode: Boolean
+    program_armed: Boolean
+    status_bits: Integer
+}
+
+entity CellProgram {
+    flash: Flash
+    addr: Integer
+    value: Integer
+}
+
+entity RangeErase {
+    flash: Flash
+    opcode: Integer
+    addr: Integer
+}
+
+entity BufferWrite {
+    flash: Flash
+    offset: Integer
+    value: Integer
+}
+
+entity IdResponse {
+    flash: Flash
+    offset: Integer
+    value: Integer
+}
+
+entity StatusResponse {
+    flash: Flash
+    value: Integer
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    erased_cell: Integer = 255
+}
+
+------------------------------------------------------------
+-- Defaults
+------------------------------------------------------------
+
+default Chip spi_rep_chip = {
+    name: "S25FL002D",
+    size: 262144,
+    page_size: 256,
+    bus: spi,
+    id_scheme: res_only,
+    id: [],
+    res_sig: 17,
+    erase_ops: { be64k, chip },
+    quirks: {}
+}
+
+default Flash spi_flash = {
+    chip: spi_rep_chip,
+    wren: false,
+    aai_active: false,
+    id_mode: false,
+    program_armed: false,
+    status_bits: 0
+}
+
+default Chip par_rep_chip = {
+    name: "SST39SF010",
+    size: 131072,
+    page_size: 0,
+    bus: parallel,
+    id_scheme: jedec_parallel,
+    id: [191, 181],
+    res_sig: 0,
+    erase_ops: { se4k },
+    quirks: {}
+}
+
+default Flash par_flash = {
+    chip: par_rep_chip,
+    wren: false,
+    aai_active: false,
+    id_mode: false,
+    program_armed: false,
+    status_bits: 0
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- SPI write-enable and write-disable
+rule WriteEnable {
+    when: WrenRequested(host, flash)
+
+    requires: flash.chip.bus = spi
+
+    ensures: flash.wren = true
+}
+
+rule WriteDisable {
+    when: WrdiRequested(host, flash)
+
+    requires: flash.chip.bus = spi
+
+    ensures: flash.wren = false
+    ensures: flash.aai_active = false
+}
+
+-- Status register: the WEL bit is reported live, the remaining bits hold
+-- the last WRSR value (masked to the writable bits).
+rule StatusRead {
+    when: StatusRequested(host, flash)
+
+    requires: flash.chip.bus = spi
+
+    ensures: StatusResponse.created(
+        flash: flash,
+        value: status_out(flash.status_bits, flash.wren)
+    )
+}
+
+-- WRSR on a chip without the EWSR quirk takes effect directly; on an EWSR
+-- chip the unarmed write is ignored (the EwsrApplied rule below owns it).
+rule WrsrApplied {
+    when: WrsrRequested(host, flash, bits)
+
+    requires: flash.chip.bus = spi
+    requires: ewsr not in flash.chip.quirks
+
+    ensures: flash.status_bits = masked_status(bits)
+}
+
+rule EwsrGatedWrsr {
+    when: EwsrApplied(host, flash, bits)
+
+    requires: flash.chip.bus = spi
+    requires: ewsr in flash.chip.quirks
+
+    ensures: flash.status_bits = masked_status(bits)
+}
+
+-- Page program: each byte is accepted only while the write-enable latch is
+-- set, and lands on the array as a bit-clearing write into the page that
+-- contains the (page-wrapped) address. The latch clears when the host ends
+-- the transaction.
+rule SpiProgramByteApplies {
+    when: SpiProgramByte(host, flash, addr, value)
+
+    requires: flash.chip.bus = spi
+    requires: flash.wren
+    requires: addr < flash.chip.size
+
+    ensures: CellProgram.created(
+        flash: flash,
+        addr: addr,
+        value: value
+    )
+}
+
+rule SpiProgramComplete {
+    when: SpiProgramComplete(host, flash)
+
+    requires: flash.chip.bus = spi
+
+    ensures: flash.wren = false
+}
+
+-- Sector/block erase: only the opcodes the chip declares take effect, and
+-- the erased region is the block containing the address, sized by the
+-- opcode (D8 erases 32K on the parts whose geometry says so).
+rule SpiErase {
+    when: SpiErase(host, flash, opcode, addr)
+
+    requires: flash.chip.bus = spi
+    requires: flash.wren
+    requires: erase_op_for(flash.chip, opcode) in flash.chip.erase_ops
+    requires: addr < flash.chip.size
+
+    ensures: RangeErase.created(
+        flash: flash,
+        opcode: opcode,
+        addr: addr
+    )
+    ensures: flash.wren = false
+}
+
+rule SpiChipErase {
+    when: SpiChipErase(host, flash)
+
+    requires: flash.chip.bus = spi
+    requires: flash.wren
+    requires: chip in flash.chip.erase_ops
+
+    ensures: RangeErase.created(
+        flash: flash,
+        opcode: 199,
+        addr: 0
+    )
+    ensures: flash.wren = false
+}
+
+-- AAI word program (the SST parts): the first word carries the address,
+-- subsequent words continue at the advanced address; the mode ends on
+-- write-disable.
+rule AaiFirstWord {
+    when: AaiProgram(host, flash, addr, low, high)
+
+    requires: flash.chip.bus = spi
+    requires: aai in flash.chip.quirks
+    requires: flash.wren
+    requires: not flash.aai_active
+
+    ensures: flash.aai_active = true
+    ensures: CellProgram.created(flash: flash, addr: addr, value: low)
+    ensures: CellProgram.created(flash: flash, addr: addr + 1, value: high)
+}
+
+rule AaiNextWord {
+    when: AaiProgram(host, flash, addr, low, high)
+
+    requires: flash.chip.bus = spi
+    requires: aai in flash.chip.quirks
+    requires: flash.aai_active
+
+    ensures: CellProgram.created(flash: flash, addr: addr, value: low)
+    ensures: CellProgram.created(flash: flash, addr: addr + 1, value: high)
+}
+
+-- The AT45 DataFlash flow: bytes land in the buffer, the buffer is written
+-- to a page (with built-in erase) on command, and pages and blocks erase
+-- in 264-byte and 8-page units.
+rule At45BufferWrite {
+    when: At45BufferWrite(host, flash, offset, value)
+
+    requires: flash.chip.bus = spi
+    requires: at45 in flash.chip.quirks
+    requires: offset < 264
+
+    ensures: BufferWrite.created(
+        flash: flash,
+        offset: offset,
+        value: value
+    )
+}
+
+rule At45BufferToPage {
+    when: At45BufferToPage(host, flash, page)
+
+    requires: flash.chip.bus = spi
+    requires: at45 in flash.chip.quirks
+
+    ensures: RangeErase.created(
+        flash: flash,
+        opcode: 131,
+        addr: page * 264
+    )
+}
+
+rule At45PageErase {
+    when: At45PageErase(host, flash, page)
+
+    requires: flash.chip.bus = spi
+    requires: at45 in flash.chip.quirks
+    requires: flash.wren
+
+    ensures: RangeErase.created(
+        flash: flash,
+        opcode: 129,
+        addr: page * 264
+    )
+    ensures: flash.wren = false
+}
+
+rule At45BlockErase {
+    when: At45BlockErase(host, flash, block)
+
+    requires: flash.chip.bus = spi
+    requires: at45 in flash.chip.quirks
+    requires: flash.wren
+
+    ensures: RangeErase.created(
+        flash: flash,
+        opcode: 80,
+        addr: block * 8 * 264
+    )
+    ensures: flash.wren = false
+}
+
+-- Parallel JEDEC engine: the id-entry and exit cycles, id-mode reads, the
+-- program cycle and the erase cycles.
+rule ParallelIdEnter {
+    when: ParIdEntryRequested(host, flash)
+
+    requires: flash.chip.bus = parallel
+
+    ensures: flash.id_mode = true
+}
+
+rule ParallelIdExit {
+    when: ParIdExitRequested(host, flash)
+
+    requires: flash.chip.bus = parallel
+
+    ensures: flash.id_mode = false
+}
+
+rule ParallelIdRead {
+    when: ParIdReadRequested(host, flash, offset)
+
+    requires: flash.chip.bus = parallel
+    requires: flash.id_mode
+    requires: offset < 3
+
+    ensures: IdResponse.created(
+        flash: flash,
+        offset: offset,
+        value: id_byte(flash.chip, offset)
+    )
+}
+
+rule ParallelProgramByte {
+    when: ParProgramRequested(host, flash, addr, value)
+
+    requires: flash.chip.bus = parallel
+    requires: addr < flash.chip.size
+
+    ensures: CellProgram.created(
+        flash: flash,
+        addr: addr,
+        value: value
+    )
+}
+
+rule ParallelSectorErase {
+    when: ParEraseRequested(host, flash, addr, sector)
+
+    requires: flash.chip.bus = parallel
+    requires: addr < flash.chip.size
+
+    ensures: RangeErase.created(
+        flash: flash,
+        opcode: 48,
+        addr: addr
+    )
+}
+
+rule ParallelChipErase {
+    when: ParEraseRequested(host, flash, addr, whole_chip)
+
+    requires: flash.chip.bus = parallel
+
+    ensures: RangeErase.created(
+        flash: flash,
+        opcode: 16,
+        addr: 0
+    )
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant ProgramEventsWithinChip {
+    for p in CellPrograms:
+        p.addr < p.flash.chip.size
+}
+
+invariant EraseEventsWithinChip {
+    for r in RangeErases:
+        r.addr < r.flash.chip.size
+}
+
+invariant IdResponsesMatchCatalog {
+    for r in IdResponses:
+        r.value = id_byte(r.flash.chip, r.offset)
+}
+
+invariant StatusResponseIsLive {
+    for s in StatusResponses:
+        s.value = status_out(s.flash.status_bits, s.flash.wren)
+}
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+actor Host {}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface SpiInterface {
+    facing host: Host
+    context flash: Flash where chip.bus = spi
+
+    exposes:
+        flash.chip.name
+        flash.chip.size
+        flash.chip.erase_ops
+        flash.wren
+
+    provides:
+        WrenRequested(host, flash)
+        WrdiRequested(host, flash)
+        StatusRequested(host, flash)
+        WrsrRequested(host, flash, bits: Integer)
+        EwsrApplied(host, flash, bits: Integer)
+        SpiProgramByte(host, flash, addr: Integer, value: Integer)
+        SpiProgramComplete(host, flash)
+        SpiErase(host, flash, opcode: Integer, addr: Integer)
+        SpiChipErase(host, flash)
+        AaiProgram(host, flash, addr: Integer, low: Integer, high: Integer)
+        At45BufferWrite(host, flash, offset: Integer, value: Integer)
+        At45BufferToPage(host, flash, page: Integer)
+        At45PageErase(host, flash, page: Integer)
+        At45BlockErase(host, flash, block: Integer)
+
+    @guidance
+        -- The probe surface: the model answers 0x9F RDID (id_len bytes),
+        -- 0x15 AT25F RDID, 0x90 REMS after three address bytes, and 0xAB
+        -- RES after three dummy bytes with the electronic signature; a
+        -- chip marked no_rdid must stay silent on 0x9F and a res_only chip
+        -- answers only 0xAB. Program and erase apply byte-wise AND (bits
+        -- only clear) and erase restores the erased_cell value; page
+        -- program wraps inside the page the first address selects.
+}
+
+surface ParallelInterface {
+    facing host: Host
+    context flash: Flash where chip.bus = parallel
+
+    exposes:
+        flash.chip.name
+        flash.chip.size
+        flash.chip.erase_ops
+
+    provides:
+        ParIdEntryRequested(host, flash)
+        ParIdExitRequested(host, flash)
+        ParIdReadRequested(host, flash, offset: Integer)
+        ParProgramRequested(host, flash, addr: Integer, value: Integer)
+        ParEraseRequested(host, flash, addr: Integer, kind: ParEraseKind)
+
+    @guidance
+        -- The JEDEC unlock sequence (write 0xAA at 0x5555, 0x55 at
+        -- 0x2AAA, command at 0x5555) precedes every operation; the
+        -- harness folds the cycles into these requests. Id-mode reads
+        -- answer the manufacturer byte at offset 0, the device byte at
+        -- offset 1 and the continuation bytes at offsets 2 and 3.
+}
