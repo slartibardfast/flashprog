@@ -18,3 +18,6 @@
 /util/ich_descriptors_tool/ich_descriptors_tool.exe
 /util/ich_descriptors_tool/.dep
 /util/ich_descriptors_tool/.obj
+
+# gfxati model self-test binary
+/gfxati-flash/gfxati-flash-test
