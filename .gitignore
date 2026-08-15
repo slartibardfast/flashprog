@@ -21,3 +21,5 @@
 
 # gfxati model self-test binary
 /gfxati-flash-test
+/gfxati_flash_TTrace_*.tla
+/gfxati-flash-test
