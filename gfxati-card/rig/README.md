@@ -32,3 +32,14 @@ XMS-ROUNDTRIP-OK), so this is a guest-side interaction, not a QEMU bug.
 rig.py's prep now adds FreeCom's `/N` swap-disable switch to the SHELL=
 line in FDCONFIG.SYS, which eliminates the TSR crash (verified: CWSDPMI
 loads and runs clean with the fix).
+
+### MS-DOS 6.22 host (the operator's procedure, 2026-08-16)
+
+The operator's fixed run matrix boots MS-DOS 6.22 cleanly to the A:\>
+prompt (R0 passes: -machine pc,graphics=off -m 16 -fda only -boot a,
+CONFIG.SYS = HIMEM.SYS /TESTMEM:OFF + DOS=HIGH + FILES/BUFFERS, A20=1,
+no hda, no card). Earlier A20=0 boot sticks were artifacts of the
+-m 128 + hda + card combination; the operator's parameters are clean.
+The boot floppy (Dos6.22.img, archive.org item dos-6.22) is the host;
+the payload lives on a separate FAT16 disk. This replaces FreeDOS as
+the atiflash host when the FreeDOS kernel's memory-manager path faults.

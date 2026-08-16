@@ -23,6 +23,7 @@ CHIP_DEFAULT = 19  # SST39SF010 (128KB, JEDEC id 0xBF 0xB5) - fits the X1900GT v
 
 AUTOEXEC = (
     "@echo off\r\n"
+    "SET SWAP=OFF\r\n"
     "\\ATIFLASH.EXE -i > \\RES.TXT\r\n"
     "\\ATIFLASH.EXE -p \\VBIOS.BIN >> \\RES.TXT\r\n"
     "\\ATIFLASH.EXE -r \\READBACK.BIN >> \\RES.TXT\r\n"
@@ -49,11 +50,13 @@ def prep(boot, atiflash, vbios, cwsdpmi, out):
 
 
 def run(out, qemu='qemu-system-x86_64', chip=CHIP_DEFAULT):
+    slog = out + '.serial.log'
     q = subprocess.Popen(
-        [qemu, '-machine', 'pc', '-m', '128',
+        [qemu, '-machine', 'pc,graphics=off', '-m', '128',
          '-device', 'gfxati-card,chip=%d' % chip,
          '-nic', 'none',
-         '-hda', out, '-display', 'none', '-no-reboot'],
+         '-hda', out, '-display', 'none',
+         '-serial', 'file:' + slog, '-no-reboot'],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         deadline = time.time() + 180
