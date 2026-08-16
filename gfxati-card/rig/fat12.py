@@ -73,8 +73,8 @@ class Fat12Image:
             seen += 1
         return out
 
-    def free_cluster(self):
-        for n in range(2, len(self.fat)):
+    def free_cluster(self, start=2):
+        for n in range(start, len(self.fat)):
             if self.fat[n] == 0:
                 return n
         return None
@@ -104,15 +104,7 @@ class Fat12Image:
         return (base[:8].upper().ljust(8) + ext[:3].upper().ljust(3)).encode()
 
     def _overwrite(self, idx, name, content):
-        clusters = []
-        remaining = len(content)
-        n = None
-        while remaining > 0:
-            free = self.free_cluster()
-            if free is None:
-                raise RuntimeError('no free clusters')
-            clusters.append(free)
-            remaining -= self.bps * self.spc
+        clusters = self._alloc(len(content))
         for i, c in enumerate(clusters):
             nextc = clusters[i + 1] if i + 1 < len(clusters) else self._end()
             self.fat[c] = nextc
@@ -140,6 +132,21 @@ class Fat12Image:
                   self.root_off + (idx + 1) * 32] = ent
         return True
 
+    def _alloc(self, size):
+        clusters = []
+        taken = set()
+        remaining = size
+        while remaining > 0:
+            free = self.free_cluster()
+            while free is not None and free in taken:
+                free = self.free_cluster(free + 1)
+            if free is None:
+                raise RuntimeError('no free clusters')
+            taken.add(free)
+            clusters.append(free)
+            remaining -= self.bps * self.spc
+        return clusters
+
     def _new_file(self, name, content):
         idx = None
         root = self.data[self.root_off:self.root_off + self.root_ents * 32]
@@ -158,14 +165,7 @@ class Fat12Image:
         ent[0x16] = 0x00
         ent[0x1A] = 0x00
         ent[0x1B] = 0x00
-        clusters = []
-        remaining = len(content)
-        while remaining > 0:
-            free = self.free_cluster()
-            if free is None:
-                raise RuntimeError('no free clusters')
-            clusters.append(free)
-            remaining -= self.bps * self.spc
+        clusters = self._alloc(len(content))
         for i, c in enumerate(clusters):
             nextc = clusters[i + 1] if i + 1 < len(clusters) else self._end()
             self.fat[c] = nextc
@@ -245,3 +245,116 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+def make_fat16_disk(size_mb=32, part_lba=63):
+    """Build a fresh FAT16 disk image from scratch (MBR + one partition).
+    The partition is FAT16 with a DOS-style boot sector; the data area is
+    empty (files are added with write_file). Used to give MS-DOS 6.22 a
+    clean payload disk - the FreeDOS Lite partition triggers a boot stick
+    in the MS-DOS IO.SYS drive setup."""
+    import math
+    total_sectors = size_mb * 1024 * 1024 // 512
+    part_sectors = total_sectors - part_lba
+    bps, spc, rsvd, nfat, root_ents = 512, 4, 1, 2, 512
+    # FAT16 size: solve spf so the FAT covers all clusters
+    root_sectors = root_ents * 32 // bps
+    for spf in range(64, 1024):
+        fat_bytes = spf * bps
+        clusters = (part_sectors - rsvd - nfat * spf - root_sectors) // spc
+        if clusters + 2 <= fat_bytes // 2:
+            break
+    img = bytearray(total_sectors * bps)
+    # MBR with one partition (type 0x04 FAT16)
+    mbr = bytearray(512)
+    mbr[446 + 4] = 0x04
+    mbr[446 + 8:446 + 12] = part_lba.to_bytes(4, 'little')
+    mbr[446 + 12:446 + 16] = part_sectors.to_bytes(4, 'little')
+    mbr[510:512] = b'\x55\xaa'
+    img[0:512] = mbr
+    # partition boot sector: BPB + a minimal stub
+    bs = bytearray(512)
+    bs[0:3] = b'\xeb\x3c\x90'
+    bs[3:11] = b'MSDOS6.22'
+    bs[11:13] = bps.to_bytes(2, 'little')
+    bs[13] = spc
+    bs[14:16] = rsvd.to_bytes(2, 'little')
+    bs[16] = nfat
+    bs[17:19] = root_ents.to_bytes(2, 'little')
+    bs[19:21] = part_sectors.to_bytes(2, 'little')
+    bs[21] = 0xF8
+    bs[22:24] = spf.to_bytes(2, 'little')
+    bs[24:26] = (63).to_bytes(2, 'little')
+    bs[26:28] = (16).to_bytes(2, 'little')
+    bs[28:32] = part_lba.to_bytes(4, 'little')
+    bs[510:512] = b'\x55\xaa'
+    img[part_lba * bps:part_lba * bps + 512] = bs
+    # FATs: media + EOF for the first two entries
+    fat = bytearray(spf * bps)
+    fat[0] = 0xF8
+    fat[1:2] = b'\xff'
+    fat[2:4] = b'\xff\xff'
+    for n in range(nfat):
+        off = (part_lba + rsvd + n * spf) * bps
+        img[off:off + len(fat)] = fat
+    return img
+
+
+def make_fat12_floppy():
+    """Build a fresh 1.44MB FAT12 floppy image (2880 sectors, 18 spt,
+    2 heads, spc 1, root 224, spf 9). Used as the payload floppy (B:) so
+    the MS-DOS host never touches the FAT16/partition code path that
+    sticks the IO.SYS boot."""
+    img = bytearray(2880 * 512)
+    bs = bytearray(512)
+    bs[0:3] = b'\xeb\x3c\x90'
+    bs[3:11] = b'MSDOS6.22'
+    bs[11:13] = (512).to_bytes(2, 'little')
+    bs[13] = 1
+    bs[14:16] = (1).to_bytes(2, 'little')
+    bs[16] = 2
+    bs[17:19] = (224).to_bytes(2, 'little')
+    bs[19:21] = (2880).to_bytes(2, 'little')
+    bs[21] = 0xF0
+    bs[22:24] = (9).to_bytes(2, 'little')
+    bs[24:26] = (18).to_bytes(2, 'little')
+    bs[26:28] = (2).to_bytes(2, 'little')
+    bs[510:512] = b'\x55\xaa'
+    img[0:512] = bs
+    fat = bytearray(9 * 512)
+    fat[0] = 0xF0
+    fat[1:2] = b'\xff'
+    fat[2:4] = b'\xff\xff'
+    img[512:512 + 9 * 512] = fat
+    img[512 + 9 * 512:512 + 18 * 512] = fat
+    return img
+
+
+def delete_file(self, name):
+    """Remove a root file: free its chain and mark the entry 0xE5."""
+    want = name.strip().lower().replace('.', '').replace(' ', '')
+    root = self.data[self.root_off:self.root_off + self.root_ents * 32]
+    for i in range(self.root_ents):
+        e = root[i * 32:(i + 1) * 32]
+        if not e or e[0] in (0x00, 0xE5):
+            continue
+        if e[11] in (0x0F, 0x08, 0x10):
+            continue
+        short = e[0:11].decode('ascii', 'replace').strip()
+        if short.lower().replace('.', '').replace(' ', '') == want:
+            import struct
+            start = struct.unpack_from('<H', e, 26)[0]
+            n = start
+            seen = 0
+            while 2 <= n < self._end() - 7 and seen < self.data_clusters:
+                nxt = self.fat[n]
+                self.fat[n] = 0
+                n = nxt
+                seen += 1
+            self._write_fat()
+            self.data[self.root_off + i * 32] = 0xE5
+            return True
+    return False
+
+
+Fat12Image.delete_file = delete_file
