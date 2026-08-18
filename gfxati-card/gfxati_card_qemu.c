@@ -8,6 +8,7 @@
 #include "hw/pci/pci_device.h"
 #include "hw/pci/pci.h"
 #include "hw/qdev-properties.h"
+#include "exec/address-spaces.h"
 #include "qapi/error.h"
 #include "qom/object.h"
 
@@ -22,15 +23,49 @@ struct GfxAtiCard {
 	uint8_t *rom_mem;
 	MemoryRegion mmio;
 	MemoryRegion rom;
+	MemoryRegion seprom_win;
 	uint32_t device_id;
 	uint32_t chip;
+	bool debug;
+	bool seprom_window_mapped;
 };
+
+static void gfxati_seprom_window_update(GfxAtiCard *s)
+{
+	bool want = (s->card.seprom_cntl1 & GFXATI_SEPROM_WINDOW_TAG) &&
+		    (s->card.seprom_cntl1 & 1);
+	if (want == s->seprom_window_mapped) {
+		return;
+	}
+	if (want) {
+		memory_region_add_subregion(get_system_memory(),
+					    s->card.seprom_window,
+					    &s->seprom_win);
+	} else {
+		memory_region_del_subregion(get_system_memory(), &s->seprom_win);
+	}
+	s->seprom_window_mapped = want;
+}
 
 static uint64_t gfxati_mmio_read(void *opaque, hwaddr offset, unsigned size)
 {
 	GfxAtiCard *s = opaque;
-	uint32_t cur = gfxati_card_mmio_read(&s->card, offset);
+	uint32_t cur;
 	unsigned shift = (offset % 4) * 8;
+	bool window = (offset == GFXATI_MM_DATA &&
+		       s->card.mm_index == GFXATI_ROM_BASE_INDEX) ||
+		      (offset == GFXATI_MM_DATA_LEGACY &&
+		       s->card.mm_index_legacy == GFXATI_ROM_BASE_INDEX) ||
+		      offset == GFXATI_ROM_BASE_DIRECT;
+	if (window) {
+		cur = pci_get_long(PCI_DEVICE(s)->config + PCI_ROM_ADDRESS) & ~1u;
+	} else {
+		cur = gfxati_card_mmio_read(&s->card, offset);
+	}
+	if (s->debug) {
+		fprintf(stderr, "gfxati mmio read  %03" HWADDR_PRIx " idx=%02x => %08x (size %u)\n",
+			offset, s->card.mm_index, cur, size);
+	}
 	return (cur >> shift) & ((1ull << (8 * size)) - 1);
 }
 
@@ -41,8 +76,18 @@ static void gfxati_mmio_write(void *opaque, hwaddr offset, uint64_t val,
 	uint32_t cur = gfxati_card_mmio_read(&s->card, offset);
 	unsigned shift = (offset % 4) * 8;
 	uint32_t mask = ((1ull << (8 * size)) - 1) << shift;
+	if (s->debug) {
+		fprintf(stderr, "gfxati mmio write %03" HWADDR_PRIx " idx=%02x <= %08x (size %u)\n",
+			offset, s->card.mm_index, (uint32_t)val, size);
+	}
+	if ((offset == GFXATI_MM_DATA && s->card.mm_index == GFXATI_ROM_BASE_INDEX) ||
+	    (offset == GFXATI_MM_DATA_LEGACY &&
+	     s->card.mm_index_legacy == GFXATI_ROM_BASE_INDEX)) {
+		return;
+	}
 	cur = (cur & ~mask) | ((val << shift) & mask);
 	gfxati_card_mmio_write(&s->card, offset, cur);
+	gfxati_seprom_window_update(s);
 }
 
 static uint64_t gfxati_rom_read(void *opaque, hwaddr offset, unsigned size)
@@ -50,9 +95,15 @@ static uint64_t gfxati_rom_read(void *opaque, hwaddr offset, unsigned size)
 	GfxAtiCard *s = opaque;
 	uint64_t v = 0;
 	unsigned i;
+	if (s->debug) {
+		fprintf(stderr, "gfxati rom  read  %05" HWADDR_PRIx " size %u\n", offset, size);
+	}
 	for (i = 0; i < size; i++) {
 		v |= (uint64_t)gfxati_card_rom_read(&s->card, offset + i)
 		     << (8 * i);
+	}
+	if (s->debug) {
+		fprintf(stderr, "gfxati rom  read  %05" HWADDR_PRIx " => %08" PRIx64 "\n", offset, v);
 	}
 	return v;
 }
@@ -62,6 +113,10 @@ static void gfxati_rom_write(void *opaque, hwaddr offset, uint64_t val,
 {
 	GfxAtiCard *s = opaque;
 	unsigned i;
+	if (s->debug) {
+		fprintf(stderr, "gfxati rom  write %05" HWADDR_PRIx " <= %08" PRIx64 " size %u\n",
+			offset, val, size);
+	}
 	for (i = 0; i < size; i++) {
 		gfxati_card_rom_write(&s->card, offset + i, val >> (8 * i));
 	}
@@ -82,6 +137,26 @@ static const MemoryRegionOps gfxati_rom_ops = {
 	.impl.min_access_size = 1,
 	.impl.max_access_size = 4,
 };
+
+static void gfxati_config_write(PCIDevice *pci_dev, uint32_t addr,
+				uint32_t val, int len)
+{
+	GfxAtiCard *s = GFXATI_CARD(pci_dev);
+	if (s->debug) {
+		fprintf(stderr, "gfxati config write %02x <= %08x (len %d)\n", addr, val, len);
+	}
+	pci_default_write_config(pci_dev, addr, val, len);
+}
+
+static uint32_t gfxati_config_read(PCIDevice *pci_dev, uint32_t addr, int len)
+{
+	GfxAtiCard *s = GFXATI_CARD(pci_dev);
+	uint32_t val = pci_default_read_config(pci_dev, addr, len);
+	if (s->debug && (addr == 0x30 || addr == 0x04 || addr == 0x02)) {
+		fprintf(stderr, "gfxati config read  %02x => %08x (len %d)\n", addr, val, len);
+	}
+	return val;
+}
 
 static void gfxati_realize(PCIDevice *pci_dev, Error **errp)
 {
@@ -121,6 +196,9 @@ static void gfxati_realize(PCIDevice *pci_dev, Error **errp)
 	pci_register_bar(pci_dev, PCI_ROM_SLOT, PCI_BASE_ADDRESS_SPACE_MEMORY,
 			 &s->rom);
 
+	memory_region_init_io(&s->seprom_win, OBJECT(s), &gfxati_rom_ops, s,
+			      "gfxati-seprom-window", rom_size);
+
 	pci_config_set_vendor_id(pci_dev->config, GFXATI_VENDOR_ID);
 	pci_config_set_device_id(pci_dev->config, s->device_id);
 	pci_config_set_class(pci_dev->config, PCI_CLASS_DISPLAY_VGA);
@@ -129,6 +207,7 @@ static void gfxati_realize(PCIDevice *pci_dev, Error **errp)
 static Property gfxati_props[] = {
 	DEFINE_PROP_UINT32("device_id", GfxAtiCard, device_id, GFXATI_DEV_R580_A),
 	DEFINE_PROP_UINT32("chip", GfxAtiCard, chip, UINT32_MAX),
+	DEFINE_PROP_BOOL("debug", GfxAtiCard, debug, false),
 	DEFINE_PROP_END_OF_LIST(),
 };
 
@@ -138,6 +217,8 @@ static void gfxati_class_init(ObjectClass *klass, void *data)
 	PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
 
 	k->realize = gfxati_realize;
+	k->config_write = gfxati_config_write;
+	k->config_read = gfxati_config_read;
 	k->vendor_id = GFXATI_VENDOR_ID;
 	k->device_id = GFXATI_DEV_R580_A;
 	k->class_id = PCI_CLASS_DISPLAY_VGA;
