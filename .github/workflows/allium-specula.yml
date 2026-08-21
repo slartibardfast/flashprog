@@ -5,7 +5,13 @@ on:
     branches: [gfxati-flash]
   pull_request:
     paths:
-      - gfxati-flash/**
+      - gfxati-flash.c
+      - gfxati-flash.h
+      - gfxati-flash-test.c
+      - gfxati-flash.allium
+      - gfxati_flash.tla
+      - gfxati_flash.cfg
+      - gfxati-card/**
       - .github/workflows/allium-specula.yml
 
 jobs:
@@ -16,16 +22,16 @@ jobs:
 
       - name: Build and self-test the flash model
         run: |
-          cc -Wall -Wextra -o gfxati-flash/gfxati-flash-test \
-            gfxati-flash/gfxati-flash.c gfxati-flash/gfxati-flash-test.c
-          ./gfxati-flash/gfxati-flash-test
+          cc -Wall -Wextra -o gfxati-flash-test \
+            gfxati-flash.c gfxati-flash-test.c
+          ./gfxati-flash-test
 
       - name: Build and self-test the gfxati card device
         run: |
-          cc -Wall -Wextra -o gfxati-card/gfxati_card_test \
-            gfxati-flash/gfxati-flash.c gfxati-card/gfxati_card.c \
+          cc -Wall -Wextra -o gfxati_card_test \
+            gfxati-flash.c gfxati-card/gfxati_card.c \
             gfxati-card/gfxati_card_test.c
-          ./gfxati-card/gfxati_card_test
+          ./gfxati_card_test
 
       - name: Build the probe kernel (boot attestation)
         run: |
@@ -39,9 +45,9 @@ jobs:
 
       - name: allium check, analyse, plan
         run: |
-          allium check gfxati-flash/gfxati-flash.allium
-          allium analyse gfxati-flash/gfxati-flash.allium
-          allium plan gfxati-flash/gfxati-flash.allium
+          allium check gfxati-flash.allium
+          allium analyse gfxati-flash.allium
+          allium plan gfxati-flash.allium
 
       - name: Install host-lifecycle (pinned)
         run: |
@@ -51,11 +57,11 @@ jobs:
 
       - name: Obligations discharged by the self-test
         run: |
-          host-lifecycle obligations gfxati-flash/gfxati-flash.allium \
-            --tests gfxati-flash --strict-discharge
+          host-lifecycle obligations gfxati-flash.allium \
+            --tests gfxati-flash-test.c --strict-discharge
 
       - name: Model-check the timing spec with TLC
         run: |
           curl -sS -o tla2tools.jar https://nightly.tlapl.us/dist/tla2tools.jar
           java -XX:+UseParallelGC -Xmx4G -jar tla2tools.jar \
-            -config gfxati-flash/gfxati_flash.cfg gfxati-flash/gfxati_flash.tla
+            -config gfxati_flash.cfg gfxati_flash.tla
