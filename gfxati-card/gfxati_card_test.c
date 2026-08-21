@@ -32,9 +32,12 @@ int main(void)
 	gfxati_card_mmio_write(&card, GFXATI_MM_INDEX, GFXATI_SEPROM_CNTL1);
 	check(gfxati_card_mmio_read(&card, GFXATI_MM_INDEX) == GFXATI_SEPROM_CNTL1,
 	      "MM_INDEX returns the index");
-	gfxati_card_mmio_write(&card, GFXATI_MM_DATA, 0x1234);
-	check(gfxati_card_mmio_read(&card, GFXATI_MM_DATA) == 0x1234,
+	gfxati_card_mmio_write(&card, GFXATI_MM_DATA, 0x2234);
+	check(gfxati_card_mmio_read(&card, GFXATI_MM_DATA) == 0x2234,
 	      "SEPROM_CNTL1 roundtrip through MM_DATA");
+	gfxati_card_mmio_write(&card, GFXATI_MM_DATA, 0x1100);
+	check(gfxati_card_mmio_read(&card, GFXATI_MM_DATA) == 0,
+	      "SEPROM_CNTL1 read-back has the busy bits clear");
 
 	gfxati_card_mmio_write(&card, GFXATI_MM_INDEX, GFXATI_SEPROM_CNTL2);
 	gfxati_card_mmio_write(&card, GFXATI_MM_DATA, 0x5678);
@@ -80,6 +83,37 @@ int main(void)
 	gfxati_card_rom_write(&card, 0x100, 0x0A);
 	check(gfxati_card_rom_read(&card, 0x100) == 0x0A,
 	      "byte program through the ROM window (AND semantics)");
+
+	/* The GPIO-block I2C bus: emulate the atiflash master (af349's
+	 * det_si2ccfg polarity - SCL and SDA are EN bits, set = driven
+	 * low) through a full address byte and check the slave ACKs the
+	 * 0x39 device (byte 0x72) by pulling SDA low on the 9th clock. */
+	{
+		int bit;
+
+		gfxati_card_mmio_write(&card, GFXATI_GPIO_EN, 0);
+		gfxati_card_mmio_write(&card, GFXATI_GPIO_EN,
+				       GFXATI_GPIO_SDA_EN);
+		check(1, "START condition accepted");
+
+		for (bit = 7; bit >= 0; bit--) {
+			int level = (0x72 >> bit) & 1;
+			uint32_t data = level ? 0 : GFXATI_GPIO_SDA_EN;
+
+			gfxati_card_mmio_write(&card, GFXATI_GPIO_EN,
+					       GFXATI_GPIO_SCL_EN | data);
+			gfxati_card_mmio_write(&card, GFXATI_GPIO_EN, data);
+		}
+		/* 9th clock: master releases SDA, the slave pulls it low */
+		gfxati_card_mmio_write(&card, GFXATI_GPIO_EN, 0);
+		check(!(gfxati_card_mmio_read(&card, GFXATI_GPIO_Y) &
+			GFXATI_GPIO_SDA_EN),
+		      "I2C slave ACKs device address 0x72");
+		gfxati_card_mmio_write(&card, GFXATI_GPIO_EN, GFXATI_GPIO_SCL_EN);
+		check((gfxati_card_mmio_read(&card, GFXATI_GPIO_Y) &
+		       GFXATI_GPIO_SDA_EN),
+		      "SDA released after the ACK clock");
+	}
 
 	if (failures) {
 		printf("%d failure(s)\n", failures);

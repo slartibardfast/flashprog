@@ -104,17 +104,11 @@ class Fat12Image:
         return (base[:8].upper().ljust(8) + ext[:3].upper().ljust(3)).encode()
 
     def _overwrite(self, idx, name, content):
-        clusters = self._alloc(len(content))
-        for i, c in enumerate(clusters):
-            nextc = clusters[i + 1] if i + 1 < len(clusters) else self._end()
-            self.fat[c] = nextc
-            off = self._cluster_off(c)
-            chunk = content[i * self.bps * self.spc:(i + 1) * self.bps * self.spc]
-            self.data[off:off + len(chunk)] = chunk
-        self._write_fat()
+        # Reuse existing clusters first
         ent = bytearray(self.data[self.root_off + idx * 32:
                                   self.root_off + (idx + 1) * 32])
         old_start = struct.unpack_from('<H', ent, 26)[0]
+        old_clusters = []
         if old_start >= 2:
             n = old_start
             seen = 0
@@ -123,8 +117,25 @@ class Fat12Image:
                 self.fat[n] = 0
                 n = nxt
                 seen += 1
-            self._write_fat()
-        ent[26:28] = struct.pack('<H', clusters[0] if clusters else 0)
+                if n >= 2 and n < 0xFF8:
+                    old_clusters.append(n)
+        
+        needed = (len(content) + self.bps * self.spc - 1) // (self.bps * self.spc)
+        new_clusters = old_clusters[:needed]
+        if len(new_clusters) < needed:
+            extra = self._alloc(needed - len(new_clusters))
+            new_clusters.extend(extra)
+        
+        for i, c in enumerate(new_clusters):
+            nextc = new_clusters[i + 1] if i + 1 < len(new_clusters) else self._end()
+            self.fat[c] = nextc
+            off = self._cluster_off(c)
+            chunk = content[i * self.bps * self.spc:(i + 1) * self.bps * self.spc]
+            self.data[off:off + len(chunk)] = chunk
+        self._write_fat()
+        ent = bytearray(self.data[self.root_off + idx * 32:
+                                  self.root_off + (idx + 1) * 32])
+        ent[26:28] = struct.pack('<H', new_clusters[0] if new_clusters else 0)
         ent[28:32] = struct.pack('<I', len(content))
         ent[0x0D] = 0x02  # time
         ent[0x0B] = 0x20  # archive

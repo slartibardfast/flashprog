@@ -14,6 +14,8 @@
 
 #include "gfxati_card.h"
 
+extern void (*gfxati_card_trace)(const char *fmt, ...);
+
 #define TYPE_GFXATI_CARD "gfxati-card"
 OBJECT_DECLARE_SIMPLE_TYPE(GfxAtiCard, GFXATI_CARD)
 
@@ -26,6 +28,7 @@ struct GfxAtiCard {
 	MemoryRegion seprom_win;
 	uint32_t device_id;
 	uint32_t chip;
+	uint8_t strap;
 	bool debug;
 	bool seprom_window_mapped;
 };
@@ -142,10 +145,19 @@ static void gfxati_config_write(PCIDevice *pci_dev, uint32_t addr,
 				uint32_t val, int len)
 {
 	GfxAtiCard *s = GFXATI_CARD(pci_dev);
+	uint32_t rom;
+
 	if (s->debug) {
 		fprintf(stderr, "gfxati config write %02x <= %08x (len %d)\n", addr, val, len);
 	}
 	pci_default_write_config(pci_dev, addr, val, len);
+	rom = pci_get_long(pci_dev->config + PCI_ROM_ADDRESS);
+	if ((rom & PCI_ROM_ADDRESS_MASK) != 0 && (rom & 1) == 0) {
+		/* atiflash's command phase runs with the ROM decode
+		 * toggled off between steps; the stub keeps serving the
+		 * flash window through the BAR regardless */
+		pci_set_long(pci_dev->config + PCI_ROM_ADDRESS, rom | 1);
+	}
 }
 
 static uint32_t gfxati_config_read(PCIDevice *pci_dev, uint32_t addr, int len)
@@ -156,6 +168,15 @@ static uint32_t gfxati_config_read(PCIDevice *pci_dev, uint32_t addr, int len)
 		fprintf(stderr, "gfxati config read  %02x => %08x (len %d)\n", addr, val, len);
 	}
 	return val;
+}
+
+static void gfxati_tracef(const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	vfprintf(stderr, fmt, ap);
+	va_end(ap);
 }
 
 static void gfxati_realize(PCIDevice *pci_dev, Error **errp)
@@ -182,6 +203,10 @@ static void gfxati_realize(PCIDevice *pci_dev, Error **errp)
 	s->rom_mem = g_malloc0(chip->size);
 	memset(s->rom_mem, 0xFF, chip->size);
 	gfxati_card_init(&s->card, s->device_id, chip, s->rom_mem);
+	s->card.strap = s->strap;
+	if (s->debug) {
+		gfxati_card_trace = gfxati_tracef;
+	}
 
 	memory_region_init_io(&s->mmio, OBJECT(s), &gfxati_mmio_ops, s,
 			      "gfxati-mmio", GFXATI_MMIO_SIZE);
@@ -207,6 +232,7 @@ static void gfxati_realize(PCIDevice *pci_dev, Error **errp)
 static Property gfxati_props[] = {
 	DEFINE_PROP_UINT32("device_id", GfxAtiCard, device_id, GFXATI_DEV_R580_A),
 	DEFINE_PROP_UINT32("chip", GfxAtiCard, chip, UINT32_MAX),
+	DEFINE_PROP_UINT8("strap", GfxAtiCard, strap, 8),
 	DEFINE_PROP_BOOL("debug", GfxAtiCard, debug, false),
 	DEFINE_PROP_END_OF_LIST(),
 };

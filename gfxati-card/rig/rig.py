@@ -25,8 +25,8 @@ AUTOEXEC = (
     "@echo off\r\n"
     "SET SWAP=OFF\r\n"
     "\\ATIFLASH.EXE -i > \\RES.TXT\r\n"
-    "\\ATIFLASH.EXE -p \\VBIOS.BIN >> \\RES.TXT\r\n"
-    "\\ATIFLASH.EXE -r \\READBACK.BIN >> \\RES.TXT\r\n"
+    "\\ATIFLASH.EXE -p 0 \\VBIOS.BIN >> \\RES.TXT\r\n"
+    "\\ATIFLASH.EXE -r 0 \\READBACK.BIN >> \\RES.TXT\r\n"
     "ECHO RIG-DONE >> \\RES.TXT\r\n"
 )
 
