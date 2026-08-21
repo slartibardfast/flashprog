@@ -58,7 +58,7 @@ jobs:
       - name: Obligations discharged by the self-test
         run: |
           host-lifecycle obligations gfxati-flash.allium \
-            --tests gfxati-flash-test.c --strict-discharge
+            --tests . --strict-discharge
 
       - name: Model-check the timing spec with TLC
         run: |
