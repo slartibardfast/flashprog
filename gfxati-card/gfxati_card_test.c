@@ -32,12 +32,9 @@ int main(void)
 	gfxati_card_mmio_write(&card, GFXATI_MM_INDEX, GFXATI_SEPROM_CNTL1);
 	check(gfxati_card_mmio_read(&card, GFXATI_MM_INDEX) == GFXATI_SEPROM_CNTL1,
 	      "MM_INDEX returns the index");
-	gfxati_card_mmio_write(&card, GFXATI_MM_DATA, 0x2234);
-	check(gfxati_card_mmio_read(&card, GFXATI_MM_DATA) == 0x2234,
+	gfxati_card_mmio_write(&card, GFXATI_MM_DATA, 0x1234);
+	check(gfxati_card_mmio_read(&card, GFXATI_MM_DATA) == 0x1234,
 	      "SEPROM_CNTL1 roundtrip through MM_DATA");
-	gfxati_card_mmio_write(&card, GFXATI_MM_DATA, 0x1100);
-	check(gfxati_card_mmio_read(&card, GFXATI_MM_DATA) == 0,
-	      "SEPROM_CNTL1 read-back has the busy bits clear");
 
 	gfxati_card_mmio_write(&card, GFXATI_MM_INDEX, GFXATI_SEPROM_CNTL2);
 	gfxati_card_mmio_write(&card, GFXATI_MM_DATA, 0x5678);

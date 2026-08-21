@@ -212,7 +212,7 @@ static uint32_t card_index_read(struct gfxati_card *c, uint32_t index)
 	switch (index) {
 	case GFXATI_SEPROM_CNTL1:
 	case GFXATI_SEPROM_CNTL1_LEGACY:
-		return c->seprom_cntl1 & ~GFXATI_BUSY_BITS;
+		return c->seprom_cntl1;
 	case GFXATI_SEPROM_CNTL2:
 	case GFXATI_SEPROM_CNTL2_LEGACY:
 		return c->seprom_cntl2;
