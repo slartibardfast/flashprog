@@ -46,6 +46,7 @@ const struct programmer_entry *const programmer_table[] = {
 
 #if CONFIG_GFXNVIDIA == 1
     &programmer_gfxnvidia,
+    &programmer_gfxati,
 #endif
 
 #if CONFIG_DRKAISER == 1

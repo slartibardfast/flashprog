@@ -122,6 +122,16 @@ struct gfxati_card {
 	int win_mode;		/* 0 array, 1 program stream, 2 status, 3 opcode, 4 erase */
 	int win_stream_open;
 
+	/* SPI identification latch (plan/0004#transport): the opcode
+	 * trigger discards the flash's MISO bytes, so an ID-class trigger
+	 * (9F RDID, 15H AT25F product ID, 90 REMS, AB RES) latches a
+	 * normalized 3-byte id that the array window serves at offsets 0,
+	 * 1 and 0xE/0xF - mirroring the parallel family's in_id_mode
+	 * convention (90H then array read). Cleared by the next window
+	 * write or mode re-arm. */
+	uint8_t spi_id_latch;
+	uint8_t spi_id[3];
+
 	/* GPIO-block I2C slave state (SCL pin 0, SDA pin 8) */
 	enum gfxati_i2c_state i2c_state;
 	uint32_t i2c_bit;

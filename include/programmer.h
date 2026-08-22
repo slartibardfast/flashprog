@@ -74,6 +74,7 @@ extern const struct programmer_entry programmer_ft2232_spi;
 extern const struct programmer_entry programmer_ft4222_spi;
 extern const struct programmer_entry programmer_gfxmatrox;
 extern const struct programmer_entry programmer_gfxnvidia;
+extern const struct programmer_entry programmer_gfxati;
 extern const struct programmer_entry programmer_internal;
 extern const struct programmer_entry programmer_it8212;
 extern const struct programmer_entry programmer_jlink_spi;

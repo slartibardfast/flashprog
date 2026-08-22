@@ -162,6 +162,8 @@ void gfxati_card_init(struct gfxati_card *c, uint32_t device_id,
 	c->i2c_sda_prev = 1;
 	c->win_mode = 0;
 	c->win_stream_open = 0;
+	c->spi_id_latch = 0;
+	c->spi_id[0] = c->spi_id[1] = c->spi_id[2] = 0;
 	c->i2c_ctl = 0;
 	c->i2c_len = 0;
 	c->i2c_fifo = 0;
@@ -192,6 +194,8 @@ static void seprom_cntl1_write(struct gfxati_card *c, uint32_t val)
 			gfxati_flash_cs(&c->flash, 1);
 			c->win_stream_open = 0;
 		}
+		/* a mode re-arm ends any latched identification */
+		c->spi_id_latch = 0;
 		if (sub == 0x00000 || sub == 0x00200) {
 			/* program stream armed (0x200 marks a burst; the
 			 * byte count rides bits 16-23) */
@@ -371,11 +375,29 @@ uint8_t gfxati_card_rom_read(struct gfxati_card *c, uint32_t addr)
 		TRACE("win status read => %02x\n", s);
 		return s;
 	}
+	if (c->spi_id_latch && c->win_mode == 0) {
+		/* SPI identification served through the array window,
+		 * mirroring the parallel family's in_id_mode convention */
+		switch (addr) {
+		case 0:
+			return c->spi_id[0];
+		case 1:
+			return c->spi_id[1];
+		case 0x0E:
+		case 0x0F:
+			return c->spi_id[2];
+		default:
+			return 0;
+		}
+	}
 	return gfxati_flash_parallel_read(&c->flash, addr);
 }
 
 void gfxati_card_rom_write(struct gfxati_card *c, uint32_t addr, uint8_t val)
 {
+	/* any window write ends a latched identification (the parallel
+	 * family's convention: writes exit ID mode) */
+	c->spi_id_latch = 0;
 	switch (c->win_mode) {
 	case 1:
 		/* program stream: one long page-program through the window;
@@ -410,6 +432,35 @@ void gfxati_card_rom_write(struct gfxati_card *c, uint32_t addr, uint8_t val)
 		 * (WRSR's value; a don't-care for single-operand ops) */
 		gfxati_flash_spi_xfer(&c->flash, val);
 		gfxati_flash_cs(&c->flash, 1);
+		/* ID-class triggers latch their answer for the array
+		 * window (the trigger path discards MISO) */
+		switch (op) {
+		case 0x9f:
+		case 0x15:
+			/* RDID / AT25F product ID: the id bytes in order */
+			c->spi_id[0] = c->flash.chip->id_bytes[0];
+			c->spi_id[1] = c->flash.chip->id_bytes[1];
+			c->spi_id[2] = c->flash.chip->id_bytes[2];
+			c->spi_id_latch = 1;
+			break;
+		case 0x90:
+			/* REMS: manufacturer then device, repeating */
+			c->spi_id[0] = c->flash.chip->id_bytes[0];
+			c->spi_id[1] = c->flash.chip->id_bytes[c->flash.chip->id_len - 1];
+			c->spi_id[2] = 0;
+			c->spi_id_latch = 1;
+			break;
+		case 0xab:
+			/* RES: the electronic signature */
+			c->spi_id[0] = c->flash.chip->res_sig;
+			c->spi_id[1] = 0;
+			c->spi_id[2] = 0;
+			c->spi_id_latch = 1;
+			break;
+		default:
+			c->spi_id_latch = 0;
+			break;
+		}
 		break;
 	}
 	default:

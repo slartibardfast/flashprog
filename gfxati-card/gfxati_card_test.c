@@ -112,6 +112,84 @@ int main(void)
 		      "SDA released after the ACK clock");
 	}
 
+	/* The SPI command window on a serial chip (the R580's own flash
+	 * family): status window, opcode triggers, and the identification
+	 * latch that serves an ID-class trigger's answer through the
+	 * array window (plan/0004#transport). */
+	{
+		const struct gfxati_flash_chip *spi = &gfxati_flash_chips[3];
+
+		gfxati_card_init(&card, GFXATI_DEV_R580_A, spi, rom);
+		check(card.flash.chip == spi, "SPI chip bound");
+
+		/* status window: RDSR with no WREN yet */
+		gfxati_card_mmio_write(&card, GFXATI_MM_INDEX,
+				       GFXATI_SEPROM_CNTL1);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA,
+				       0x09000000 | 0x010);
+		check(gfxati_card_rom_read(&card, 0) == 0,
+		      "status window answers RDSR (idle)");
+
+		/* WREN via opcode trigger, then the status window shows WEL */
+		gfxati_card_mmio_write(&card, GFXATI_MM_INDEX,
+				       GFXATI_SEPROM_CNTL2);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA, 0x06 << 16);
+		gfxati_card_mmio_write(&card, GFXATI_MM_INDEX,
+				       GFXATI_SEPROM_CNTL1);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA,
+				       0x09000000 | 0x001);
+		gfxati_card_rom_write(&card, 0, 0);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA,
+				       0x09000000 | 0x010);
+		check(gfxati_card_rom_read(&card, 0) & 0x02,
+		      "WREN trigger sets WEL in the status window");
+
+		/* identification: AT25F product-ID trigger (15H scheme),
+		 * answer latched and served through the array window */
+		gfxati_card_mmio_write(&card, GFXATI_MM_INDEX,
+				       GFXATI_SEPROM_CNTL2);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA, 0x15 << 16);
+		gfxati_card_mmio_write(&card, GFXATI_MM_INDEX,
+				       GFXATI_SEPROM_CNTL1);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA,
+				       0x09000000 | 0x001);
+		gfxati_card_rom_write(&card, 0, 0);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA, GFXATI_CS_BIT);
+		check(gfxati_card_rom_read(&card, 0) == 0x1F &&
+		      gfxati_card_rom_read(&card, 1) == 0x60,
+		      "product-ID trigger latches 1F 60 for the array window");
+
+		/* REMS trigger normalizes to manufacturer+device */
+		gfxati_card_mmio_write(&card, GFXATI_MM_INDEX,
+				       GFXATI_SEPROM_CNTL2);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA, 0x90 << 16);
+		gfxati_card_mmio_write(&card, GFXATI_MM_INDEX,
+				       GFXATI_SEPROM_CNTL1);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA,
+				       0x09000000 | 0x001);
+		gfxati_card_rom_write(&card, 0, 0);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA, GFXATI_CS_BIT);
+		check(gfxati_card_rom_read(&card, 0) == 0x1F &&
+		      gfxati_card_rom_read(&card, 1) == 0x60,
+		      "REMS trigger latches the same id pair");
+
+		/* a window write ends the identification */
+		gfxati_card_rom_write(&card, 0x10000, 0);
+		check(gfxati_card_rom_read(&card, 0) == rom[0],
+		      "identification ends on window write");
+
+		/* program stream: arm, write, close - and the byte lands */
+		rom[0x80] = 0xFF;
+		gfxati_card_mmio_write(&card, GFXATI_MM_INDEX,
+				       GFXATI_SEPROM_CNTL1);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA,
+				       0x09000000 | 0x200 | (1 << 16));
+		gfxati_card_rom_write(&card, 0x80, 0x5A);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA, GFXATI_CS_BIT);
+		check(gfxati_card_rom_read(&card, 0x80) == 0x5A,
+		      "program stream writes through the window");
+	}
+
 	if (failures) {
 		printf("%d failure(s)\n", failures);
 		return 1;

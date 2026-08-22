@@ -266,6 +266,14 @@ programmer = {
     'srcs'    : files('gfxnvidia.c', 'pcidev.c'),
     'flags'   : [ '-DCONFIG_GFXNVIDIA=1' ],
   },
+  'gfxati' : {
+    'systems' : systems_hwaccess,
+    'cpu_families' : [ cpus_raw_mem ],
+    'deps'    : [ libpci ],
+    'groups'  : [ group_pci, group_internal ],
+    'srcs'    : files('gfxati.c', 'pcidev.c'),
+    'flags'   : [ '-DCONFIG_GFXATI=1' ],
+  },
   'internal' : {
     'systems' : systems_hwaccess + ['linux'],
     'cpu_families' : (host_machine.system() == 'linux' ? [ cpus_raw_mem ] : [ ['x86', 'x86_64'] ]),
