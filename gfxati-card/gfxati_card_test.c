@@ -188,6 +188,40 @@ int main(void)
 		gfxati_card_mmio_write(&card, GFXATI_MM_DATA, GFXATI_CS_BIT);
 		check(gfxati_card_rom_read(&card, 0x80) == 0x5A,
 		      "program stream writes through the window");
+		/* sector erase through an address-carrying trigger: CNTL2
+		 * = addr<<24 | 0x52<<16, the second 32KB block */
+		rom[0x80] = 0x5A;
+		rom[0x8000] = 0x5A;
+		/* WREN first: the erase is gated on it */
+		gfxati_card_mmio_write(&card, GFXATI_MM_INDEX,
+				       GFXATI_SEPROM_CNTL2);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA, 0x06 << 16);
+		gfxati_card_mmio_write(&card, GFXATI_MM_INDEX,
+				       GFXATI_SEPROM_CNTL1);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA,
+				       0x09000000 | 0x001);
+		gfxati_card_rom_write(&card, 0, 0);
+		gfxati_card_mmio_write(&card, GFXATI_MM_INDEX,
+				       GFXATI_SEPROM_CNTL2);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA,
+				       (0x52u << 16) | (0x8000 >> 8));
+		gfxati_card_mmio_write(&card, GFXATI_MM_INDEX,
+				       GFXATI_SEPROM_CNTL1);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA, 0);
+		check(gfxati_card_mmio_read(&card, GFXATI_MM_INDEX) == GFXATI_SEPROM_CNTL1,
+		      "index re-asserted");
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA,
+				       0x09000000 | 0x001);
+		gfxati_card_rom_write(&card, 0, 0x8000 & 0xff);
+		gfxati_card_mmio_write(&card, GFXATI_MM_DATA, GFXATI_CS_BIT);
+		check(gfxati_card_rom_read(&card, 0x8000) == 0xFF,
+		      "sector erase clears the addressed block");
+		check(gfxati_card_rom_read(&card, 0x80) == 0x5A,
+		      "other sectors survive the erase");
+
+		/* WREN is required before the erase takes (checked above
+		 * implicitly via the flash model's wren gate on the
+		 * earlier program test) */
 	}
 
 	if (failures) {

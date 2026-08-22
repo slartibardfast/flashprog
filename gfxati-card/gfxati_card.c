@@ -428,9 +428,26 @@ void gfxati_card_rom_write(struct gfxati_card *c, uint32_t addr, uint8_t val)
 			 * 62 87 per flashprog's AT25F1024 entry) */
 			gfxati_flash_spi_xfer(&c->flash, 0x87);
 		}
-		/* the trigger byte itself is the command's data operand
-		 * (WRSR's value; a don't-care for single-operand ops) */
-		gfxati_flash_spi_xfer(&c->flash, val);
+		/* address-carrying erases take their sector address as
+		 * CNTL2 bits 0-15 = addr[23:8] plus the trigger byte as
+		 * addr[7:0] (the byte is the operand slot, unused by
+		 * erases; the opcode keeps its attested bits 16-23) */
+		switch (op) {
+		case 0x20:	/* SE 4KB */
+		case 0x52:	/* AT25F sector erase */
+		case 0x81:	/* AT45 block erase */
+		case 0x94:	/* AT45 sector erase */
+		case 0xd8:	/* BE 64KB */
+			gfxati_flash_spi_xfer(&c->flash,
+					      (c->seprom_cntl2 >> 8) & 0xff);
+			gfxati_flash_spi_xfer(&c->flash,
+					      c->seprom_cntl2 & 0xff);
+			gfxati_flash_spi_xfer(&c->flash, val & 0xff);
+			break;
+		default:
+			gfxati_flash_spi_xfer(&c->flash, val);
+			break;
+		}
 		gfxati_flash_cs(&c->flash, 1);
 		/* ID-class triggers latch their answer for the array
 		 * window (the trigger path discards MISO) */

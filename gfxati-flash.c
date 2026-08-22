@@ -14,6 +14,7 @@ enum gfxati_spi_state {
 	SPI_RDSR,
 	SPI_WRSR,
 	SPI_ID,
+	SPI_ATMEL_CE,	/* the Atmel chip-erase pair: 62 armed, 87 fires */
 	SPI_REMS,
 	SPI_RES_DUMMY,
 	SPI_RES_OUT,
@@ -52,6 +53,9 @@ static void erase_region(struct gfxati_flash *f, uint8_t opcode, uint32_t addr)
 	case 0x52:
 		erase_block(f, addr & ~(32u * 1024 - 1), 32 * 1024);
 		return;
+	case 0x62:
+		erase_block(f, 0, f->chip->size);
+		return;
 	case 0xD8:
 		if (f->chip->erase_cmds & GFXATI_ERASE_D8_32K) {
 			erase_block(f, addr & ~(32u * 1024 - 1), 32 * 1024);
@@ -84,6 +88,7 @@ static int chip_has_erase(const struct gfxati_flash_chip *chip, uint8_t opcode)
 		return !!(chip->erase_cmds & GFXATI_ERASE_32K);
 	case 0xD8:
 		return !!(chip->erase_cmds & GFXATI_ERASE_64K);
+	case 0x62:
 	case 0xC7:
 	case 0x60:
 		return !!(chip->erase_cmds & GFXATI_ERASE_CHIP);
@@ -314,6 +319,13 @@ uint8_t gfxati_flash_spi_xfer(struct gfxati_flash *f, uint8_t in)
 				spi_begin(f, 0);
 			}
 			break;
+		case 0x62:
+			/* the Atmel chip-erase pair: 62 arms, 87 fires,
+			 * within one chip-select cycle */
+			if (f->wren && chip_has_erase(f->chip, 0x62)) {
+				f->state = SPI_ATMEL_CE;
+			}
+			break;
 		case 0xC7:
 		case 0x60:
 			if (f->wren && chip_has_erase(f->chip, 0xC7)) {
@@ -390,6 +402,14 @@ uint8_t gfxati_flash_spi_xfer(struct gfxati_flash *f, uint8_t in)
 
 	case SPI_WRSR:
 		f->status = in & 0x7C;
+		f->state = SPI_IDLE;
+		break;
+
+	case SPI_ATMEL_CE:
+		if (in == 0x87) {
+			erase_block(f, 0, f->chip->size);
+			f->wren = 0;
+		}
 		f->state = SPI_IDLE;
 		break;
 
@@ -542,12 +562,12 @@ uint8_t gfxati_flash_parallel_read(struct gfxati_flash *f, uint32_t addr)
 }
 
 const struct gfxati_flash_chip gfxati_flash_chips[] = {
-	{ "AT25F512", 64 * 1024, 256, GFXATI_SPI, GFXATI_ID_AT25F, { 0x1F, 0x60, 0 }, 2, 0, GFXATI_ERASE_4K, 0 },
-	{ "AT25F512A", 64 * 1024, 128, GFXATI_SPI, GFXATI_ID_AT25F, { 0x1F, 0x65, 0 }, 2, 0, GFXATI_ERASE_4K, 0 },
-	{ "AT25F512B", 64 * 1024, 256, GFXATI_SPI, GFXATI_ID_RDID, { 0x65, 0x00, 0 }, 2, 0, GFXATI_ERASE_4K, 0 },
-	{ "AT25F1024", 128 * 1024, 256, GFXATI_SPI, GFXATI_ID_AT25F, { 0x1F, 0x60, 0 }, 2, 0, GFXATI_ERASE_4K, 0 },
-	{ "AT25F2048", 256 * 1024, 256, GFXATI_SPI, GFXATI_ID_AT25F, { 0x1F, 0x63, 0 }, 2, 0, GFXATI_ERASE_4K, 0 },
-	{ "AT25F4096", 512 * 1024, 256, GFXATI_SPI, GFXATI_ID_AT25F, { 0x1F, 0x64, 0 }, 2, 0, GFXATI_ERASE_4K, 0 },
+	{ "AT25F512", 64 * 1024, 256, GFXATI_SPI, GFXATI_ID_AT25F, { 0x1F, 0x60, 0 }, 2, 0, GFXATI_ERASE_32K | GFXATI_ERASE_CHIP, 0 },
+	{ "AT25F512A", 64 * 1024, 128, GFXATI_SPI, GFXATI_ID_AT25F, { 0x1F, 0x65, 0 }, 2, 0, GFXATI_ERASE_32K | GFXATI_ERASE_CHIP, 0 },
+	{ "AT25F512B", 64 * 1024, 256, GFXATI_SPI, GFXATI_ID_RDID, { 0x65, 0x00, 0 }, 2, 0, GFXATI_ERASE_4K | GFXATI_ERASE_CHIP, 0 },
+	{ "AT25F1024", 128 * 1024, 256, GFXATI_SPI, GFXATI_ID_AT25F, { 0x1F, 0x60, 0 }, 2, 0, GFXATI_ERASE_32K | GFXATI_ERASE_CHIP, 0 },
+	{ "AT25F2048", 256 * 1024, 256, GFXATI_SPI, GFXATI_ID_AT25F, { 0x1F, 0x63, 0 }, 2, 0, GFXATI_ERASE_64K | GFXATI_ERASE_CHIP, 0 },
+	{ "AT25F4096", 512 * 1024, 256, GFXATI_SPI, GFXATI_ID_AT25F, { 0x1F, 0x64, 0 }, 2, 0, GFXATI_ERASE_64K | GFXATI_ERASE_CHIP, 0 },
 	{ "AT25S010N", 128 * 1024, 256, GFXATI_SPI, GFXATI_ID_RDID, { 0x66, 0x01, 0 }, 2, 0, GFXATI_ERASE_4K, 0 },
 	{ "M25P05", 64 * 1024, 256, GFXATI_SPI, GFXATI_ID_RDID, { 0x20, 0x10, 0 }, 2, 0, GFXATI_ERASE_64K, 0 },
 	{ "M25P10", 128 * 1024, 256, GFXATI_SPI, GFXATI_ID_RDID, { 0x20, 0x11, 0 }, 2, 0, GFXATI_ERASE_64K, 0 },
