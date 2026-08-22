@@ -248,7 +248,10 @@ static const struct spi_master spi_master_gfxati = {
 	.max_data_read	= 256,
 	.max_data_write	= 256,
 	.command	= gfxati_spi_command,
+	.multicommand	= default_spi_send_multicommand,
 	.read		= gfxati_spi_read,
+	.write_256	= default_spi_write_256,
+	.probe_opcode	= default_spi_probe_opcode,
 };
 
 static const struct dev_entry gfxati_devices[] = {
@@ -283,12 +286,16 @@ static int gfxati_init(struct flashprog_programmer *const prog)
 	 * and enabled (firmware does this for a VGA-class card - the
 	 * rig's SeaBIOS included). */
 	rom = pci_read_long(dev, PCI_ROM_ADDRESS);
-	if (!(rom & PCI_ROM_ADDRESS_ENABLE)) {
-		rom |= PCI_ROM_ADDRESS_ENABLE;
-		rpci_write_long(dev, PCI_ROM_ADDRESS, rom);
-		rom = pci_read_long(dev, PCI_ROM_ADDRESS);
-	}
 	rom_base = rom & PCI_ROM_ADDRESS_MASK;
+	/* Always write the full address+enable through the config path:
+	 * the kernel's VGA shadowed-ROM fixup leaves the enable bit off,
+	 * and re-writing the value makes the PCI core (qemu included)
+	 * refresh the region mapping - atiflash did the same. */
+	rpci_write_long(dev, PCI_ROM_ADDRESS,
+			rom_base | PCI_ROM_ADDRESS_ENABLE);
+	rom = pci_read_long(dev, PCI_ROM_ADDRESS);
+	msg_pinfo("gfxati: ROM config 0x%x, command 0x%x\n", rom,
+		  pci_read_long(dev, PCI_COMMAND));
 	if (!rom_base) {
 		msg_perr("gfxati: ROM BAR has no address assigned; "
 			 "cannot reach the flash window.\n");
@@ -309,6 +316,23 @@ static int gfxati_init(struct flashprog_programmer *const prog)
 
 	/* Idle: chip select deasserted, no window mode armed. */
 	gfxati_arm(GFXATI_CS_BIT);
+	msg_pinfo("gfxati: CNTL1 read-back 0x%x\n",
+		 gfxati_reg_read(GFXATI_SEPROM_CNTL1_INDEX));
+	msg_pinfo("gfxati: rom window bytes %02x %02x\n",
+		 gfxati_romwin[0], gfxati_romwin[1]);
+	{
+		unsigned char id[2];
+		uint8_t st;
+		gfxati_read_id(0x15, id, 2);
+		msg_pinfo("gfxati: AT25F id probe %02x %02x\n", id[0], id[1]);
+		/* WREN then RDSR: the status window must answer 0x02 */
+		gfxati_trigger(0x06, 0);
+		gfxati_arm(GFXATI_WIN_STATUS);
+		st = gfxati_romwin[0];
+		gfxati_arm(GFXATI_CS_BIT);
+		msg_pinfo("gfxati: RDSR after WREN 0x%02x\n", st);
+		gfxati_trigger(0x04, 0);
+	}
 
 	return register_spi_master(&spi_master_gfxati, GFXATI_ROM_WINDOW_SIZE,
 				   NULL);
