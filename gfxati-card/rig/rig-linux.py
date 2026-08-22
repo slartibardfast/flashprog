@@ -57,20 +57,55 @@ BB=/bin/busybox
 $BB mount -t proc proc /proc 2>/dev/null
 $BB mount -t sysfs sysfs /sys 2>/dev/null
 $BB mount -t devtmpfs dev /dev 2>/dev/null
-echo "RIG-BOOT linux-guest"
-FP="/rig/ld-linux-x86-64.so.2 --library-path /rig /rig/flashprog -c AT25F1024(A)"
+. /rig/scenario
+echo "RIG-BOOT linux-guest scenario=$SCENARIO chip=$QCHIP strap=$QSTRAP"
+FP="/rig/ld-linux-x86-64.so.2 --library-path /rig /rig/flashprog $CHIPARGS"
+if [ "$NEGATIVE" = "1" ]; then
+	echo "=== negative: wrong chip forced ==="
+	$FP -p gfxati
+	echo "RIG-ID-EXIT=$?"
+	echo "RIG-DONE"
+	$BB sleep 1
+	$BB poweroff -f
+	exit 0
+fi
+if [ "$SCENARIO" = "ssid-guard" ]; then
+	echo "=== guard pass 1: a blank-SSID image with strap bytes ==="
+	$FP -p gfxati -c 'AT25F1024(A)' -w /rig/ssid-a.bin
+	echo "RIG-STAGE1-EXIT=$?"
+	echo "=== guard pass 2: a differing SSID onto the blank card must be refused ==="
+	$FP -p gfxati -c 'AT25F1024(A)' -w /rig/ssid-b.bin
+	echo "RIG-STAGE2-EXIT=$?"
+	echo "=== guard pass 3: --force overrides (the card was erased by pass 2; B lands as-is) ==="
+	$FP -p gfxati -c 'AT25F1024(A)' --force -w /rig/ssid-b.bin
+	echo "RIG-STAGE3-EXIT=$?"
+	$FP -p gfxati -c 'AT25F1024(A)' -r /rig/readback.bin
+	echo "RIG-STAGE4-EXIT=$?"
+	if $BB cmp -s /rig/ssid-b.bin /rig/readback.bin; then
+		echo "RIG-FORCE-AS-IS"
+	else
+		echo "RIG-FORCE-MISMATCH"
+	fi
+	echo "=== guard pass 5: a card that carries an SSID crossflashes freely ==="
+	$FP -p gfxati -c 'AT25F1024(A)' -w /rig/ssid-a2.bin
+	echo "RIG-STAGE5-EXIT=$?"
+	$FP -p gfxati -c 'AT25F1024(A)' -w /rig/ssid-c.bin
+	echo "RIG-STAGE6-EXIT=$?"
+	echo "RIG-DONE"
+	$BB sleep 1
+	$BB poweroff -f
+	exit 0
+fi
 echo "=== identify ==="
 $FP -p gfxati
 echo "RIG-ID-EXIT=$?"
 echo "=== write ==="
-$BB cp /rig/rom.bin /rig/rom-pad.bin
-$BB dd if=/dev/zero bs=86016 count=1 2>/dev/null | $BB tr '\\000' '\\377' >> /rig/rom-pad.bin
-$FP -p gfxati -w /rig/rom-pad.bin
+$FP -p gfxati -w "$IMAGE"
 echo "RIG-WRITE-EXIT=$?"
 echo "=== read back ==="
 $FP -p gfxati -r /rig/readback.bin
 echo "RIG-READ-EXIT=$?"
-if $BB cmp -s /rig/rom-pad.bin /rig/readback.bin; then
+if $BB cmp -s "$IMAGE" /rig/readback.bin; then
 	echo "RIG-READBACK-MATCH"
 else
 	echo "RIG-READBACK-MISMATCH"
@@ -88,6 +123,13 @@ def prep(flashprog, vbios, outdir):
 	shutil_copy(flashprog, outdir + '/overlay/rig/flashprog')
 	os.chmod(outdir + '/overlay/rig/flashprog', 0o755)
 	shutil_copy(vbios, outdir + '/overlay/rig/rom.bin')
+	with open(outdir + '/overlay/rig/rom-pad.bin', 'wb') as f:
+		f.write(open(vbios, 'rb').read())
+		f.write(b'\xff' * (128 * 1024 - os.path.getsize(vbios)))
+	with open(outdir + '/overlay/rig/scenario', 'w') as f:
+		f.write("SCENARIO=baseline\nQCHIP=%d\nQSTRAP=%d\n"
+			"CHIPARGS='-c AT25F1024(A)'\nIMAGE=/rig/rom-pad.bin\n"
+			"NEGATIVE=0\n" % (CHIP, STRAP))
 	libs = subprocess.run(['ldd', flashprog], capture_output=True,
 			      text=True).stdout
 	import re
@@ -123,6 +165,298 @@ def build_initrd(outdir):
 			with open(os.path.join(outdir, part), 'rb') as f:
 				out.write(f.read())
 	print('prep: initrd.combined built')
+
+
+# (name, qemu chip index, strap, -c arg or None, image, negative)
+# The matrix covers every identification scheme the DB shares with
+# the model: the AT25F 15H product ID, plain JEDEC RDID, and the
+# multi-erase families; one scenario probes with NO -c (uniqueness),
+# one runs a LYING strap (the probe must ignore the hint), and one
+# negative forces the wrong chip. EXCLUDED, recorded: AT45DB011D (the
+# window transport carries no AT45 buffer-opcode path - a #chip-set
+# gap, not a regression) and MX25L*/W25P10/S25FL001D (model-only,
+# the DB lacks entries - the optional lineage additions).
+# The COMPLETE disposition table for every serial chip in the model
+# (gfxati-flash.c, indices 0-32). "complete w.r.t. the test chips":
+# every chip is either RUN (full five-check workflow) or EXCLUDED
+# with a recorded reason. The card sizes its ROM window to the chip
+# (the rig traces and the af349 chip matrix, which ran full
+# workflows on the 512KB parts through this same window, prove it),
+# so the programmer derives the window from the ROM BAR sizing probe
+# and no chip is out of range.
+#
+# disposition: full | exclude
+CHIPS = [
+	# idx model name      size    -c name (DB)      disposition  reason
+	(0,  "AT25F512",     "64K",  "AT25F512",       "full",   "AT25F 15H scheme, 32K sectors"),
+	(1,  "AT25F512A",    "64K",  "AT25F512A",      "full",   "AT25F scheme, 128B pages"),
+	(2,  "AT25F512B",    "64K",  "AT25F512B",      "full",   "JEDEC RDID 1F 65 00"),
+	(3,  "AT25F1024",    "128K", "AT25F1024(A)",   "full",   "the R580's own chip; baseline uses the real 9700 Pro ROM"),
+	(4,  "AT25F2048",    "256K", "AT25F2048",      "full",   "AT25F scheme, 64K sectors"),
+	(5,  "AT25F4096",    "512K", "AT25F4096",      "full",   "AT25F scheme; the af349 chip matrix ran this part"),
+	(6,  "AT25S010N",    "128K", "AT25FS010",      "full",   "the DB's AT25FS010 entry is this part (the archived sheet is its printing; JEDEC 1F 66 01)"),
+	(7,  "M25P05",       "64K",  "M25P05",         "full",   "RES-only 1999 ST part (signature 05)"),
+	(8,  "M25P10",       "128K", "M25P10",         "full",   "RES-only 1999 ST part (signature 10)"),
+	(9,  "M25P20",       "256K", "M25P20",         "full",   "JEDEC RDID 20 20 12"),
+	(10, "M25P40",       "512K", "M25P40",         "full",   "JEDEC RDID 20 20 13; ran in the af349 chip matrix"),
+	(11, "MX25L512",     "64K",  "MX25L512",       "full",   "DB entry added (catalog chip, archived sheet grounding)"),
+	(12, "MX25L5121E",   "64K",  "MX25L5121E",     "full",   "JEDEC RDID C2 22 10"),
+	(13, "MX25L1005",    "128K", "MX25L1005",      "full",   "DB entry added"),
+	(14, "MX25L1024lE",  "128K", "MX25L1024lE",    "full",   "DB entry added (shares C2 20 11 with MX25L1005; needs -c)"),
+	(15, "MX25L2005",    "256K", "MX25L2005",      "full",   "DB entry added"),
+	(16, "SST25VF512",   "64K",  "SST25VF512",     "full",   "DB entry added (REMS BF 48)"),
+	(17, "SST25VF010",   "128K", "SST25VF010",     "full",   "SST BF 25 49, 4K/32K/64K erases"),
+	(18, "SST25VF020",   "256K", "SST25VF020",     "full",   "REMS device 43 (differs from its JEDEC id)"),
+	(19, "SST25VF040",   "512K", "SST25VF040",     "full",   "REMS device 44; ran in the af349 chip matrix"),
+	(20, "SST25VF040B",  "512K", "SST25VF040B",    "full",   "AAI+EWSR quirks; ran in the af349 chip matrix"),
+	(21, "W25P10",       "128K", "W25P10",         "full",   "DB entry added (REMS/RES 10h; predates RDID)"),
+	(22, "W25P20",       "256K", "W25P20",         "full",   "DB entry added (REMS/RES 11h)"),
+	(23, "W25P40",       "512K", "W25P40",         "full",   "DB entry added (REMS/RES 12h)"),
+	(24, "W25Q40",       "512K", "W25Q40.V",       "full",   "JEDEC RDID EF 40 13; ran in the af349 chip matrix"),
+	(25, "W25X10",       "128K", "W25X10",         "full",   "JEDEC RDID EF 30 11, RES 10"),
+	(26, "W25X20",       "256K", "W25X20",         "full",   "JEDEC RDID EF 30 12, RES 11"),
+	(27, "W25X40",       "512K", "W25X40",         "full",   "JEDEC RDID EF 30 13, RES 12; ran in the af349 chip matrix"),
+	(28, "W25X80",       "1M",   "W25X80",         "full",   "the largest catalog part (1MB window)"),
+	(29, "S25FL001D",    "128K", "S25FL001D",      "full",   "DB entry added (RES 10h; no JEDEC RDID)"),
+	(30, "S25FL002D",    "256K", "S25FL002D",      "full",   "DB entry added (RES 11h; no JEDEC RDID)"),
+	(31, "S25FL004A",    "512K", "S25FL004A",      "full",   "JEDEC RDID 01 02 12 (Spansion)"),
+	(32, "AT45DB011D",   "128K", None,             "exclude","the window carries no AT45 buffer-opcode path (transport gap, #chip-set)"),
+]
+
+# strap values per family (the hint flashprog logs; the probe decides)
+FAMILY_STRAP = {"AT25F": 4, "M25P": 5, "MX": 5, "SST": 6, "W25": 7,
+		"S25FL": 5, "AT45": 4, "AT25S": 4}
+
+# the flash size in bytes per chip index, for image synthesis
+KB = 1024
+SIZES = {}
+for _idx, _name, _sz, _cname, _disp, _reason in CHIPS:
+	SIZES[_idx] = int(_sz.rstrip('KM')) * (KB if _sz.endswith('K')
+					       else KB * KB)
+
+KERNEL_URL = ("https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/"
+	      "x86_64/netboot-3.20.3/vmlinuz-lts")
+INITRAMFS_URL = ("https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/"
+		 "x86_64/netboot-3.20.3/initramfs-lts")
+KERNEL_SHA256 = "62c37ee5eb7cc244290b990b1c811df60212d87e97c84086bfb31081bbaa573b"
+INITRAMFS_SHA256 = "f5303bdd26eef67b714928886fb482405f401c73779fb9926a8a73de9eb324de"
+
+
+def verify_pinned(outdir):
+	"""Durability: the guest pieces are pinned by sha256; a mismatch
+	fails closed (re-fetch from the pinned Alpine 3.20.3 netboot URLs)."""
+	import hashlib
+	for fname, want in [('vmlinuz-lts', KERNEL_SHA256),
+			    ('initramfs-alpine', INITRAMFS_SHA256)]:
+		path = os.path.join(outdir, fname)
+		h = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+		if h != want:
+			raise SystemExit('FAIL: %s sha256 %s != pinned %s; '
+					 're-fetch %s{vmlinuz-lts,initramfs-lts}'
+					 % (fname, h, want,
+					    'https://dl-cdn.alpinelinux.org/alpine/'
+					    'v3.20/releases/x86_64/netboot-3.20.3/'))
+	print('prep: pinned guest pieces verified (kernel + initramfs)')
+
+
+def family_strap(name):
+	for fam, strap in FAMILY_STRAP.items():
+		if name.startswith(fam):
+			return strap
+	return 9
+
+
+def scenarios_from_chips():
+	"""Every runnable scenario, derived from the complete table."""
+	scen = []
+	for idx, name, _size, cname, disp, _reason in CHIPS:
+		if disp == "full":
+			image = "rom-pad.bin" if idx == 3 else "img-%d.bin" % idx
+			scen.append((name, idx, family_strap(name),
+				     "-c " + cname, image, False))
+	scen.append(("M25P10-lying-strap", 8, 9, "-c M25P10",
+		     "img-8.bin", False))
+	scen.append(("ssid-guard", 3, 9, "", "ssid-a.bin", 3))
+	scen.append(("negative-wrong-chip", 3, 9, "-c MX25L512",
+		     "rom-pad.bin", 1))
+	return scen
+
+
+def synth_image(path, size, seed):
+	"""A deterministic per-chip image: a 16-bit LCG byte stream."""
+	state = seed & 0xFFFF
+	data = bytearray(size)
+	for i in range(size):
+		state = (state * 251 + 17) & 0xFFFF
+		data[i] = (state >> 8) & 0xFF
+	open(path, 'wb').write(bytes(data))
+
+
+def prep_matrix(flashprog, vbios, outdir):
+	os.makedirs(outdir + '/overlay/rig', exist_ok=True)
+	verify_pinned(outdir)
+	open(outdir + '/overlay/init', 'w').write(INIT)
+	os.chmod(outdir + '/overlay/init', 0o755)
+	shutil_copy(flashprog, outdir + '/overlay/rig/flashprog')
+	os.chmod(outdir + '/overlay/rig/flashprog', 0o755)
+	shutil_copy(vbios, outdir + '/overlay/rig/rom.bin')
+	# the padded baseline image
+	with open(outdir + '/overlay/rig/rom-pad.bin', 'wb') as f:
+		f.write(open(vbios, 'rb').read())
+		f.write(b'\xff' * (128 * 1024 - os.path.getsize(vbios)))
+	# the SSID-guard images: a blank-SSID image A (with distinct
+	# strap bytes at 0x7A/0x7B), a stamped image B, a crossflash
+	# image C, and B/C with the strap bytes re-inserted (what the
+	# readback must equal after the guard preserves them)
+	base = outdir + '/overlay/rig/'
+	a = bytearray(open(base + 'img-8.bin', 'rb').read()[:128 * 1024])
+	a[0x1A] = 0x00; a[0x1B] = 0x00
+	a[0x7A] = 0xC3; a[0x7B] = 0x5A
+	open(base + 'ssid-a.bin', 'wb').write(bytes(a))
+	b = bytearray(a)
+	b[0x1A] = 0x44; b[0x1B] = 0x4E	# 0x4E44 - the R580's SSID
+	b[0x7A] = 0x00; b[0x7B] = 0x00	# B would wipe the strap bytes
+	open(base + 'ssid-b.bin', 'wb').write(bytes(b))
+	bp = bytearray(b)
+	bp[0x7A] = 0xC3; bp[0x7B] = 0x5A
+	open(base + 'ssid-b-preserved.bin', 'wb').write(bytes(bp))
+	c = bytearray(b)
+	c[0x1A] = 0x78; c[0x1B] = 0x56	# 0x5678 - a crossflash
+	c[0x7A] = 0x00; c[0x7B] = 0x00
+	open(base + 'ssid-c.bin', 'wb').write(bytes(c))
+	cp = bytearray(c)
+	cp[0x7A] = 0xC3; cp[0x7B] = 0x5A
+	open(base + 'ssid-c-preserved.bin', 'wb').write(bytes(cp))
+	a2 = bytearray(a)
+	a2[0x1A] = 0x11; a2[0x1B] = 0x11	# a real SSID + the strap bytes
+	open(base + 'ssid-a2.bin', 'wb').write(bytes(a2))
+	for idx, size in SIZES.items():
+		if idx != 3:
+			synth_image(outdir + '/overlay/rig/img-%d.bin' % idx,
+				    size, idx + 1)
+	# every scenario's config, prepared now, swapped in at run time
+	for name, chip, strap, chipargs, image, neg in scenarios_from_chips():
+		with open(outdir + '/scenario-%s' % name, 'w') as f:
+			f.write("SCENARIO=%s\nQCHIP=%d\nQSTRAP=%d\n"
+				"CHIPARGS='%s'\nIMAGE=/rig/%s\nNEGATIVE=%d\n"
+				% (name, chip, strap, chipargs, image, neg or 0))
+	print('prep: matrix ready in %s' % outdir)
+	build_initrd(outdir)
+
+
+def run_scenario(outdir, qemu, name, chip, strap, chipargs, image, neg,
+		 timeout_s=200):
+	# swap the scenario file into the overlay and rebuild the initrd
+	shutil_copy(os.path.join(outdir, 'scenario-' + name),
+		    os.path.join(outdir, 'overlay', 'rig', 'scenario'))
+	build_initrd(outdir)
+	slog = os.path.join(outdir, 'serial-%s.log' % name)
+	q = subprocess.Popen(
+		[qemu, '-machine', 'pc,graphics=off', '-m', '512',
+		 '-kernel', os.path.join(outdir, 'vmlinuz-lts'),
+		 '-initrd', os.path.join(outdir, 'initrd.combined'),
+		 '-append', 'console=ttyS0,115200',
+		 '-device', 'gfxati-card,chip=%d,strap=%d' % (chip, strap),
+		 '-nic', 'none', '-display', 'none',
+		 '-serial', 'file:' + slog, '-no-reboot'],
+		stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+	try:
+		deadline = time.time() + timeout_s
+		text = ''
+		while time.time() < deadline:
+			time.sleep(5)
+			if q.poll() is not None:
+				try:
+					text = open(slog, errors='replace').read()
+				except OSError:
+					pass
+				break
+			try:
+				text = open(slog, errors='replace').read()
+			except OSError:
+				continue
+			if 'RIG-DONE' in text:
+				break
+		if 'RIG-DONE' not in text:
+			print('FAIL %s: no RIG-DONE' % name)
+			return False
+		if 'RIG-BOOT' in text:
+			print(text[text.find('RIG-BOOT'):text.find('RIG-DONE')][:2000])
+		if neg == 3:
+			checks = [
+				('stage1 blank image written',
+				 'RIG-STAGE1-EXIT=0' in text),
+				('stage2 refused without force',
+				 ('RIG-STAGE2-EXIT=1' in text or
+				  'RIG-STAGE2-EXIT=2' in text) and
+				 'refusing to stamp an identity' in text),
+				('stage3 forced through',
+				 'RIG-STAGE3-EXIT=0' in text),
+				('stage4 readback matches B as-is',
+				 'RIG-STAGE4-EXIT=0' in text and
+				 'RIG-FORCE-AS-IS' in text),
+				('stage5 the crossflash base written',
+				 'RIG-STAGE5-EXIT=0' in text),
+				('stage6 crossflash without force',
+				 'RIG-STAGE6-EXIT=0' in text),
+			]
+			ok = True
+			for what, passed in checks:
+				if not passed:
+					print('FAIL %s: %s' % (name, what))
+					ok = False
+			if ok:
+				print('ok: %s (guard: refuse/force/preserve/'
+				      'crossflash)' % name)
+			return ok
+		if neg == 1:
+			ok = 'RIG-ID-EXIT=1' in text
+			print('%s %s (negative: refused the wrong chip)'
+			      % ('ok:' if ok else 'FAIL:', name))
+			return ok
+		if neg == 2:
+			ok = ('RIG-ID-EXIT=1' in text and
+			      'too big for this programmer' in text)
+			print('%s %s (out of window range: refused cleanly)'
+			      % ('ok:' if ok else 'FAIL:', name))
+			return ok
+		checks = [
+			('identified', 'RIG-ID-EXIT=0' in text),
+			('erase+write', 'Erase/write done.' in text),
+			('verified', 'VERIFIED.' in text),
+			('read back', 'RIG-READ-EXIT=0' in text),
+			('byte-identical', 'RIG-READBACK-MATCH' in text),
+		]
+		ok = True
+		for what, passed in checks:
+			if not passed:
+				print('FAIL %s: %s' % (name, what))
+				ok = False
+		if ok:
+			print('ok: %s (all five checks)' % name)
+		return ok
+	finally:
+		q.terminate()
+
+
+def run_matrix(outdir, qemu='qemu-system-x86_64'):
+	ok = True
+	print('=== chip disposition table (all %d serial chips in the model) ==='
+	      % len(CHIPS))
+	for idx, name, size, cname, disp, reason in CHIPS:
+		print('  [%2d] %-12s %-5s -> %-7s %s'
+		      % (idx, name, size, disp, reason))
+	print('=== scenarios ===')
+	for name, chip, strap, chipargs, image, neg in scenarios_from_chips():
+		ok = run_scenario(outdir, qemu, name, chip, strap, chipargs,
+				  image, neg) and ok
+	if not ok:
+		return 1
+	print('MATRIX-ATTESTED (%d chips: %d full, %d excluded)'
+	      % (len(CHIPS),
+		 sum(1 for c in CHIPS if c[4] == 'full'),
+		 sum(1 for c in CHIPS if c[4] == 'exclude')))
+	return 0
 
 
 def run(outdir, qemu='qemu-system-x86_64', timeout_s=240):
@@ -194,6 +528,13 @@ def main():
 	if sys.argv[1] == '--prep':
 		os.makedirs(sys.argv[4], exist_ok=True)
 		prep(sys.argv[2], sys.argv[3], sys.argv[4])
+	elif sys.argv[1] == '--prep-matrix':
+		os.makedirs(sys.argv[4], exist_ok=True)
+		prep_matrix(sys.argv[2], sys.argv[3], sys.argv[4])
+	elif sys.argv[1] == '--run-matrix':
+		args = sys.argv[3:]
+		qemu = args[0] if args else 'qemu-system-x86_64'
+		sys.exit(run_matrix(sys.argv[2], qemu))
 	elif sys.argv[1] == '--run':
 		args = sys.argv[3:]
 		qemu = args[0] if args else 'qemu-system-x86_64'

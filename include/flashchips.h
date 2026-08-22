@@ -715,6 +715,8 @@
 #define SPANSION_ID		0x01	/* Spansion, same ID as AMD */
 /* S25 chips are SPI. The first device ID byte is memory type and
  * the second device ID byte is memory capacity. */
+#define SPANSION_S25FL001D_RES	0x10	/* RES electronic signature; no JEDEC RDID */
+#define SPANSION_S25FL002D_RES	0x11	/* RES electronic signature; no JEDEC RDID */
 #define SPANSION_S25FL004A	0x0212
 #define SPANSION_S25FL008A	0x0213
 #define SPANSION_S25FL016A	0x0214
@@ -1008,6 +1010,9 @@
  * byte of device ID is related to log(bitsize).
  */
 #define WINBOND_NEX_ID		0xEF	/* Winbond (ex Nexcom) serial flashes */
+#define WINBOND_NEX_W25P10_REMS	0x10	/* REMS/RES device code; the W25P predates JEDEC RDID */
+#define WINBOND_NEX_W25P20_REMS	0x11	/* REMS/RES device code */
+#define WINBOND_NEX_W25P40_REMS	0x12	/* REMS/RES device code */
 #define WINBOND_NEX_W25P80	0x2014
 #define WINBOND_NEX_W25P16	0x2015
 #define WINBOND_NEX_W25P32	0x2016

@@ -314,6 +314,8 @@ cards)"
 .sp
 .BR "* gfxnvidia" " (for flash ROMs on NVIDIA graphics cards)"
 .sp
+.BR "* gfxati" " (for flash ROMs on ATI R5xx-generation graphics cards)"
+.sp
 .BR "* drkaiser" " (for flash ROMs on Dr. Kaiser PC-Waechter PCI cards)"
 .sp
 .BR "* satasii" " (for flash ROMs on Silicon Image SATA/IDE controllers)"
@@ -765,7 +767,7 @@ that chip is write-protected (on real hardware the pin is usually negated, but
 not here).
 .SS
 .BR "nic3com" , " nicrealtek" , " nicnatsemi" , " nicintel", " nicintel_eeprom"\
-, " nicintel_spi" , " nicamd" , " gfxmatrox" , " gfxnvidia" , " ogp_spi"\
+, " nicintel_spi" , " nicamd" , " gfxmatrox" , " gfxnvidia" , " gfxati" , " ogp_spi"\
 , " drkaiser", " satasii" , " scsilsi", " satamv" , " atahpt", " atavia "\
 , " atapromise " and " it8212 " programmers
 .IP
@@ -926,6 +928,68 @@ and
 .sp
 .B Note
 that not all GPIOL pins are freely usable with all programmers as some have special functionality.
+.SS
+.BR "gfxati " programmer
+.IP
+This driver flashes the ROM of ATI R5xx-generation graphics cards
+(Radeon X1800/X1900, and the surrounding RV5xx family) through the
+card's own SEPROM interface: PCI device 0x1002 with the R5xx device
+IDs, BAR0 for the register surface, and the PCI ROM BAR as the
+flash window. The interface is the same one the era's own atiflash
+utilities drove; the window is sized from the card itself, so
+whatever ROM the card carries \(em including modified or prototype
+boards \(em is addressed without artificial limits.
+.sp
+Like the other PCI programmers, the
+.B pci
+parameter selects a specific card,
+.sp
+.B "  flashprog \-p gfxati:pci=bb:dd.f"
+.sp
+The card's flash-strap register is read at init and logged as a
+hint about the flash family; identification is always by probing
+the flash itself, never by the strap (OEM boards misstrapped their
+ROMs often enough that the original tools carried manual overrides
+for exactly this reason).
+.SS
+.BR "gfxati: the SSID guard "
+.IP
+The card's 16-bit subsystem ID lives at ROM offset 0x1A. A write
+whose image carries a different SSID than a card whose own field is
+blank (0x0000) is refused \(em stamping an identity onto a
+blank-stamped card is how boards get bricked into the wrong
+identity. A card that already carries an SSID may be crossflashed
+freely. The single override is flashprog's global
+.BR \-\-force .
+.sp
+Note the order semantics: flashprog erases before it writes, and
+the guard fires at write time \(em a refused write therefore leaves
+the flash erased (recoverable by writing with
+.BR \-\-force ,
+or with a corrected image). The era's DOS tools checked before
+erasing; flashprog's pipeline does not.
+.SS
+.BR "gfxati: preserving the card's strap bytes "
+.IP
+ROM offsets 0x7A and 0x7B are the card's own strap bytes. This
+programmer deliberately does not rewrite them behind your back: it
+writes and verifies exactly the image you give it. To keep the
+card's strap bytes through a flash, exclude the region with a
+layout,
+.sp
+.B "  flashprog \-p gfxati \-i vbios \\\\
+.br
+\ \-\-layout gfxati\-preserve\-rom.layout \-w new\-image.rom"
+.sp
+with a layout file such as
+.sp
+.B "  00000000:00000079 vbios"
+.br
+.B "  0000007c:0001ffff rest"
+.sp
+which writes everything except 0x7A\(en0x7B. Read the card first
+(\fB\-r\fR) if you need its current strap values for the image
+you are writing.
 .SS
 .BR "ft4222_spi " programmer
 .IP
@@ -1582,7 +1646,7 @@ need PCI configuration space read access and raw I/O port access.
 .B atahpt
 needs PCI configuration space access and raw I/O port access.
 .sp
-.BR gfxmatrox ", " gfxnvidia ", " drkaiser " and " it8212
+.BR gfxmatrox ", " gfxnvidia ", " gfxati ", " drkaiser " and " it8212
 need PCI configuration space access and raw memory access.
 .sp
 .B rayer_spi

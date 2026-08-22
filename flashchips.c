@@ -2096,6 +2096,320 @@ const struct flashchip flashchips[] = {
 	},
 
 	{
+		/* The atiflash-catalog MX25L512 (C2 20 10); grounded by the
+		 * archived Macronix sheet (manufacturer C2, type 20,
+		 * capacity 10). Untested until real hardware asserts. */
+		.vendor		= "Macronix",
+		.name		= "MX25L512",
+		.bustype	= BUS_SPI,
+		.id.type	= ID_SPI_RDID,
+		.id.manufacture	= MACRONIX_ID,
+		.id.model	= MACRONIX_MX25L512,
+		.total_size	= 64,
+		.page_size	= 256,
+		.feature_bits	= FEATURE_WRSR_WREN,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= TIMING_ZERO,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {4 * 1024, 16} },
+				.block_erase = spi_block_erase_20,
+			}, {
+				.eraseblocks = { {64 * 1024, 1} },
+				.block_erase = spi_block_erase_d8,
+			}
+		},
+		.printlock	= spi_prettyprint_status_register_plain,
+		.unlock		= spi_disable_blockprotect,
+		.write		= spi_chip_write_256,
+		.read		= spi_chip_read,
+		.voltage	= {2700, 3600},
+	},
+
+	{
+		/* The atiflash-catalog MX25L1005 (C2 20 11), archived sheet:
+		 * "11(hex) for MX25L1005". */
+		.vendor		= "Macronix",
+		.name		= "MX25L1005",
+		.bustype	= BUS_SPI,
+		.id.type	= ID_SPI_RDID,
+		.id.manufacture	= MACRONIX_ID,
+		.id.model	= MACRONIX_MX25L1005,
+		.total_size	= 128,
+		.page_size	= 256,
+		.feature_bits	= FEATURE_WRSR_WREN,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= TIMING_ZERO,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {4 * 1024, 32} },
+				.block_erase = spi_block_erase_20,
+			}, {
+				.eraseblocks = { {64 * 1024, 2} },
+				.block_erase = spi_block_erase_d8,
+			}
+		},
+		.printlock	= spi_prettyprint_status_register_plain,
+		.unlock		= spi_disable_blockprotect,
+		.write		= spi_chip_write_256,
+		.read		= spi_chip_read,
+		.voltage	= {2700, 3600},
+	},
+
+	{
+		/* The af417 catalog's "MX25L1024lE" spelling: same JEDEC id
+		 * (C2 20 11) as MX25L1005 - identification needs -c. */
+		.vendor		= "Macronix",
+		.name		= "MX25L1024lE",
+		.bustype	= BUS_SPI,
+		.id.type	= ID_SPI_RDID,
+		.id.manufacture	= MACRONIX_ID,
+		.id.model	= MACRONIX_MX25L1005,
+		.total_size	= 128,
+		.page_size	= 256,
+		.feature_bits	= FEATURE_WRSR_WREN,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= TIMING_ZERO,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {4 * 1024, 32} },
+				.block_erase = spi_block_erase_20,
+			}, {
+				.eraseblocks = { {64 * 1024, 2} },
+				.block_erase = spi_block_erase_d8,
+			}
+		},
+		.printlock	= spi_prettyprint_status_register_plain,
+		.unlock		= spi_disable_blockprotect,
+		.write		= spi_chip_write_256,
+		.read		= spi_chip_read,
+		.voltage	= {2700, 3600},
+	},
+
+	{
+		/* The atiflash-catalog MX25L2005 (C2 20 12), archived sheet:
+		 * "12(hex) for MX25L2005". */
+		.vendor		= "Macronix",
+		.name		= "MX25L2005",
+		.bustype	= BUS_SPI,
+		.id.type	= ID_SPI_RDID,
+		.id.manufacture	= MACRONIX_ID,
+		.id.model	= MACRONIX_MX25L2005,
+		.total_size	= 256,
+		.page_size	= 256,
+		.feature_bits	= FEATURE_WRSR_WREN,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= TIMING_ZERO,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {4 * 1024, 64} },
+				.block_erase = spi_block_erase_20,
+			}, {
+				.eraseblocks = { {64 * 1024, 4} },
+				.block_erase = spi_block_erase_d8,
+			}
+		},
+		.printlock	= spi_prettyprint_status_register_plain,
+		.unlock		= spi_disable_blockprotect,
+		.write		= spi_chip_write_256,
+		.read		= spi_chip_read,
+		.voltage	= {2700, 3600},
+	},
+
+	{
+		/* The atiflash-catalog SST25VF512 (REMS BF 48; the family's
+		 * REMS device codes come from the archived SST sheets). */
+		.vendor		= "SST",
+		.name		= "SST25VF512",
+		.bustype	= BUS_SPI,
+		.id.type	= ID_SPI_REMS,
+		.id.manufacture	= SST_ID,
+		.id.model	= SST_SST25VF512_REMS,
+		.total_size	= 64,
+		.page_size	= 256,
+		.feature_bits	= FEATURE_WRSR_WREN,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= TIMING_ZERO,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {4 * 1024, 16} },
+				.block_erase = spi_block_erase_20,
+			}, {
+				.eraseblocks = { {32 * 1024, 2} },
+				.block_erase = spi_block_erase_52,
+			}, {
+				.eraseblocks = { {64 * 1024, 1} },
+				.block_erase = spi_block_erase_d8,
+			}
+		},
+		.printlock	= spi_prettyprint_status_register_plain,
+		.unlock		= spi_disable_blockprotect,
+		.write		= spi_chip_write_256,
+		.read		= spi_chip_read,
+		.voltage	= {2700, 3600},
+	},
+
+	{
+		/* The atiflash-catalog W25P10: the W25P family predates
+		 * JEDEC RDID - identification is the REMS/RES device code
+		 * (10h, per the archived W25P10/20/40 sheet's own table). */
+		.vendor		= "Winbond",
+		.name		= "W25P10",
+		.bustype	= BUS_SPI,
+		.id.type	= ID_SPI_REMS,
+		.id.manufacture	= WINBOND_NEX_ID,
+		.id.model	= WINBOND_NEX_W25P10_REMS,
+		.total_size	= 128,
+		.page_size	= 256,
+		.feature_bits	= FEATURE_WRSR_WREN,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= TIMING_ZERO,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {64 * 1024, 2} },
+				.block_erase = spi_block_erase_d8,
+			}, {
+				.eraseblocks = { {128 * 1024, 1} },
+				.block_erase = spi_block_erase_c7,
+			}
+		},
+		.printlock	= spi_prettyprint_status_register_plain,
+		.unlock		= spi_disable_blockprotect,
+		.write		= spi_chip_write_256,
+		.read		= spi_chip_read,
+		.voltage	= {2700, 3600},
+	},
+
+	{
+		/* W25P20: REMS/RES device 11h (archived sheet). */
+		.vendor		= "Winbond",
+		.name		= "W25P20",
+		.bustype	= BUS_SPI,
+		.id.type	= ID_SPI_REMS,
+		.id.manufacture	= WINBOND_NEX_ID,
+		.id.model	= WINBOND_NEX_W25P20_REMS,
+		.total_size	= 256,
+		.page_size	= 256,
+		.feature_bits	= FEATURE_WRSR_WREN,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= TIMING_ZERO,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {64 * 1024, 4} },
+				.block_erase = spi_block_erase_d8,
+			}, {
+				.eraseblocks = { {256 * 1024, 1} },
+				.block_erase = spi_block_erase_c7,
+			}
+		},
+		.printlock	= spi_prettyprint_status_register_plain,
+		.unlock		= spi_disable_blockprotect,
+		.write		= spi_chip_write_256,
+		.read		= spi_chip_read,
+		.voltage	= {2700, 3600},
+	},
+
+	{
+		/* W25P40: REMS/RES device 12h (archived sheet). */
+		.vendor		= "Winbond",
+		.name		= "W25P40",
+		.bustype	= BUS_SPI,
+		.id.type	= ID_SPI_REMS,
+		.id.manufacture	= WINBOND_NEX_ID,
+		.id.model	= WINBOND_NEX_W25P40_REMS,
+		.total_size	= 512,
+		.page_size	= 256,
+		.feature_bits	= FEATURE_WRSR_WREN,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= TIMING_ZERO,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {64 * 1024, 8} },
+				.block_erase = spi_block_erase_d8,
+			}, {
+				.eraseblocks = { {512 * 1024, 1} },
+				.block_erase = spi_block_erase_c7,
+			}
+		},
+		.printlock	= spi_prettyprint_status_register_plain,
+		.unlock		= spi_disable_blockprotect,
+		.write		= spi_chip_write_256,
+		.read		= spi_chip_read,
+		.voltage	= {2700, 3600},
+	},
+
+	{
+		/* The atiflash-catalog S25FL001D: no JEDEC RDID - the ID is
+		 * the RES electronic signature 10h (archived S25FL001D/002D
+		 * sheet). 4x32KB sectors, SE D8h only, BE C7h. */
+		.vendor		= "Spansion",
+		.name		= "S25FL001D",
+		.bustype	= BUS_SPI,
+		.id.type	= ID_SPI_RES1,
+		.id.manufacture	= 0, /* Not used. */
+		.id.model	= SPANSION_S25FL001D_RES,
+		.total_size	= 128,
+		.page_size	= 256,
+		.feature_bits	= FEATURE_WRSR_WREN,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= TIMING_ZERO,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {32 * 1024, 4} },
+				.block_erase = spi_block_erase_d8,
+			}, {
+				.eraseblocks = { {128 * 1024, 1} },
+				.block_erase = spi_block_erase_c7,
+			}
+		},
+		.printlock	= spi_prettyprint_status_register_plain,
+		.unlock		= spi_disable_blockprotect,
+		.write		= spi_chip_write_256,
+		.read		= spi_chip_read,
+		.voltage	= {2700, 3600},
+	},
+
+	{
+		/* The atiflash-catalog S25FL002D: RES electronic signature
+		 * 11h (archived sheet). 4x64KB sectors, SE D8h, BE C7h. */
+		.vendor		= "Spansion",
+		.name		= "S25FL002D",
+		.bustype	= BUS_SPI,
+		.id.type	= ID_SPI_RES1,
+		.id.manufacture	= 0, /* Not used. */
+		.id.model	= SPANSION_S25FL002D_RES,
+		.total_size	= 256,
+		.page_size	= 256,
+		.feature_bits	= FEATURE_WRSR_WREN,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= TIMING_ZERO,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {64 * 1024, 4} },
+				.block_erase = spi_block_erase_d8,
+			}, {
+				.eraseblocks = { {256 * 1024, 1} },
+				.block_erase = spi_block_erase_c7,
+			}
+		},
+		.printlock	= spi_prettyprint_status_register_plain,
+		.unlock		= spi_disable_blockprotect,
+		.write		= spi_chip_write_256,
+		.read		= spi_chip_read,
+		.voltage	= {2700, 3600},
+	},
+
+	{
 		.vendor		= "Atmel",
 		.name		= "AT25F512",
 		.bustype	= BUS_SPI,

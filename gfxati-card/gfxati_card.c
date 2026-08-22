@@ -453,18 +453,47 @@ void gfxati_card_rom_write(struct gfxati_card *c, uint32_t addr, uint8_t val)
 		 * window (the trigger path discards MISO) */
 		switch (op) {
 		case 0x9f:
+			/* JEDEC RDID - only RDID-scheme parts answer; a
+			 * silent part latches the no-data pattern (all
+			 * FF) so probes see absence, not array content */
+			if (c->flash.chip->id_scheme == GFXATI_ID_RDID) {
+				c->spi_id[0] = c->flash.chip->id_bytes[0];
+				c->spi_id[1] = c->flash.chip->id_bytes[1];
+				c->spi_id[2] = c->flash.chip->id_bytes[2];
+			} else {
+				c->spi_id[0] = c->spi_id[1] = c->spi_id[2] = 0xff;
+			}
+			c->spi_id_latch = 1;
+			break;
 		case 0x15:
-			/* RDID / AT25F product ID: the id bytes in order */
-			c->spi_id[0] = c->flash.chip->id_bytes[0];
-			c->spi_id[1] = c->flash.chip->id_bytes[1];
-			c->spi_id[2] = c->flash.chip->id_bytes[2];
+			/* the AT25F product-ID read - AT25F-scheme parts */
+			if (c->flash.chip->id_scheme == GFXATI_ID_AT25F) {
+				c->spi_id[0] = c->flash.chip->id_bytes[0];
+				c->spi_id[1] = c->flash.chip->id_bytes[1];
+				c->spi_id[2] = c->flash.chip->id_bytes[2];
+			} else {
+				c->spi_id[0] = c->spi_id[1] = c->spi_id[2] = 0xff;
+			}
 			c->spi_id_latch = 1;
 			break;
 		case 0x90:
-			/* REMS: manufacturer then device, repeating */
-			c->spi_id[0] = c->flash.chip->id_bytes[0];
-			c->spi_id[1] = c->flash.chip->id_bytes[c->flash.chip->id_len - 1];
-			c->spi_id[2] = 0;
+			/* REMS - RDID- and AT25F-scheme parts (the /C
+			 * variants); RES-only parts stay silent (FF) */
+			if (c->flash.chip->id_scheme == GFXATI_ID_RDID ||
+			    c->flash.chip->id_scheme == GFXATI_ID_AT25F) {
+				/* the REMS device code: older parts carry a
+				 * different one than their JEDEC id (the
+				 * SST VF020/040 use 43/44 where RDID says
+				 * 4A/4B); where they differ, the RES
+				 * signature field holds the REMS code */
+				c->spi_id[0] = c->flash.chip->id_bytes[0];
+				c->spi_id[1] = c->flash.chip->res_sig ?
+					c->flash.chip->res_sig :
+					c->flash.chip->id_bytes[c->flash.chip->id_len - 1];
+				c->spi_id[2] = 0;
+			} else {
+				c->spi_id[0] = c->spi_id[1] = c->spi_id[2] = 0xff;
+			}
 			c->spi_id_latch = 1;
 			break;
 		case 0xab:

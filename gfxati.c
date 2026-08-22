@@ -69,7 +69,13 @@
 #define GFXATI_WIN_TRIGGER		0x09000001	/* any other sub */
 
 #define GFXATI_MMIO_SIZE		0x8000
-#define GFXATI_ROM_WINDOW_SIZE		0x20000
+
+/* The card sizes its ROM window to the flash chip (power of two >=
+ * the chip size, per the rig traces and the af349 chip matrix, which
+ * ran full workflows on 512KB parts through this same window) - so
+ * the programmer derives the window size from the ROM BAR sizing
+ * probe instead of assuming one. */
+static size_t gfxati_rom_window_size;
 
 /* The strap register's flash-family table (register 0xE4 shift 4,
  * mask 0xF) - logged as a hint, never trusted as a verdict. */
@@ -164,6 +170,8 @@ static int gfxati_read_id(uint8_t opcode, unsigned char *readarr, unsigned int r
 	return 0;
 }
 
+static void gfxati_capture_identity(void);
+
 static int gfxati_spi_command(const struct spi_master *mst, unsigned int writecnt,
 			      unsigned int readcnt, const unsigned char *writearr,
 			      unsigned char *readarr)
@@ -202,7 +210,7 @@ static int gfxati_spi_command(const struct spi_master *mst, unsigned int writecn
 
 		gfxati_arm(GFXATI_CS_BIT);
 		for (i = 0; i < readcnt; i++)
-			readarr[i] = gfxati_romwin[(addr + i) % GFXATI_ROM_WINDOW_SIZE];
+			readarr[i] = gfxati_romwin[(addr + i) % gfxati_rom_window_size];
 		return 0;
 	}
 
@@ -220,11 +228,26 @@ static int gfxati_spi_command(const struct spi_master *mst, unsigned int writecn
 		unsigned int len = writecnt - 4;
 		unsigned int i;
 
-		gfxati_arm(GFXATI_WIN_PROGRAM | (len << 16));
+		/* the burst-count field is 8 bits and informational only
+		 * (the stream runs to re-arm); mask so a 256-byte page
+		 * cannot overflow into the mode bits */
+		gfxati_arm(GFXATI_WIN_PROGRAM | ((len & 0xff) << 16));
 		for (i = 0; i < len; i++)
-			gfxati_romwin[(addr + i) % GFXATI_ROM_WINDOW_SIZE] = writearr[4 + i];
+			gfxati_romwin[(addr + i) % gfxati_rom_window_size] = writearr[4 + i];
 		gfxati_arm(GFXATI_CS_BIT);
 		return gfxati_wait_busy();
+	}
+
+	/* Erases end the identity window: capture the onboard SSID
+	 * and strap bytes before the first one fires. */
+	switch (opcode) {
+	case 0x20:
+	case 0x52:
+	case 0x62:
+	case 0xc7:
+	case 0xd8:
+		gfxati_capture_identity();
+		break;
 	}
 
 	/* Everything else is a single-operand trigger: WREN, WRDI,
@@ -232,6 +255,82 @@ static int gfxati_spi_command(const struct spi_master *mst, unsigned int writecn
 	 * completes the 62 87 pair itself), deep power-down. */
 	gfxati_trigger(opcode, writecnt > 1 ? writearr[1] : 0);
 	return gfxati_wait_busy();
+}
+
+/* The SSID guard and the preserve bytes (plan/0004#ssid-guard, from
+ * the port spec's honest translation of the flasher's own rule):
+ *
+ * A 16-bit SSID lives at ROM offset 0x1A. The flasher refused a
+ * write only when the ONBOARD field was zero and the image's field
+ * differed - a card that already carries an SSID may be crossflashed
+ * freely; only writing an identity onto a blank-stamped ROM needs
+ * forcing. flashprog's --force is the single override.
+ *
+ * ROM offsets 0x7A/0x7B are the card's strap bytes and must survive
+ * every write - the onboard values are restored into whatever image
+ * is written. */
+#define GFXATI_SSID_OFF		0x1A
+#define GFXATI_PRESERVE1_OFF	0x7A
+#define GFXATI_PRESERVE2_OFF	0x7B
+
+/* The card's identity must be read BEFORE the erase wipes it - the
+ * flasher read the ROM first; the master captures the onboard SSID
+ * and strap bytes when the first erase fires (and defensively at
+ * write time if no erase preceded). */
+static int gfxati_identity_captured;
+static uint8_t gfxati_onboard_ssid_lo, gfxati_onboard_ssid_hi;
+static uint8_t gfxati_onboard_strap1, gfxati_onboard_strap2;
+
+static void gfxati_capture_identity(void)
+{
+	if (gfxati_identity_captured)
+		return;
+	gfxati_arm(GFXATI_CS_BIT);
+	gfxati_onboard_ssid_lo = gfxati_romwin[GFXATI_SSID_OFF];
+	gfxati_onboard_ssid_hi = gfxati_romwin[GFXATI_SSID_OFF + 1];
+	gfxati_onboard_strap1 = gfxati_romwin[GFXATI_PRESERVE1_OFF];
+	gfxati_onboard_strap2 = gfxati_romwin[GFXATI_PRESERVE2_OFF];
+	gfxati_identity_captured = 1;
+	msg_pinfo("gfxati: identity captured ssid %02x%02x strap %02x %02x\n",
+		  gfxati_onboard_ssid_hi, gfxati_onboard_ssid_lo,
+		  gfxati_onboard_strap1, gfxati_onboard_strap2);
+}
+
+static int gfxati_spi_write_256(struct flashctx *flash, const uint8_t *buf,
+				unsigned int start, unsigned int len)
+{
+	const uint8_t *cur = buf;
+
+	if (start <= GFXATI_SSID_OFF && start + len > GFXATI_PRESERVE2_OFF) {
+		uint16_t onboard_ssid, image_ssid;
+
+		/* read the identity as it was BEFORE any erase in this
+		 * run (the flasher read the ROM first) */
+		gfxati_capture_identity();
+
+		onboard_ssid = (uint16_t)gfxati_onboard_ssid_lo |
+			       (uint16_t)gfxati_onboard_ssid_hi << 8;
+		image_ssid = buf[GFXATI_SSID_OFF - start] |
+			     buf[GFXATI_SSID_OFF + 1 - start] << 8;
+		if (onboard_ssid == 0 && image_ssid != onboard_ssid &&
+		    !flash->flags.force) {
+			msg_perr("gfxati: the card's SSID field is blank "
+				 "(0x0000) and the image carries 0x%04x - "
+				 "refusing to stamp an identity onto a "
+				 "blank card. Use --force to override.\n",
+				 image_ssid);
+			return 1;
+		}
+
+		/* The strap bytes at 0x7A/0x7B are NOT silently spliced:
+		 * flashprog verifies the image as given, and a programmer
+		 * that patches bytes behind its back breaks verification.
+		 * Preservation is flashprog's own mechanism - a layout
+		 * that excludes 0x7A-0x7B leaves them untouched through
+		 * erase and write (the docs carry the recipe). */
+	}
+
+	return default_spi_write_256(flash, cur, start, len);
 }
 
 static int gfxati_spi_read(struct flashctx *flash, uint8_t *buf,
@@ -250,7 +349,13 @@ static const struct spi_master spi_master_gfxati = {
 	.command	= gfxati_spi_command,
 	.multicommand	= default_spi_send_multicommand,
 	.read		= gfxati_spi_read,
-	.write_256	= default_spi_write_256,
+	.write_256	= gfxati_spi_write_256,
+	/* The window's program stream is 02-PP only; SST's AAI (0xAD)
+	 * streaming has no transport here. The VF parts accept normal
+	 * page program (atiflash programmed the SST25VF040B through
+	 * this very window with 02 - the af349 chip matrix), so the
+	 * AAI hook falls back to the PP writer. */
+	.write_aai	= default_spi_write_256,
 	.probe_opcode	= default_spi_probe_opcode,
 };
 
@@ -301,8 +406,23 @@ static int gfxati_init(struct flashprog_programmer *const prog)
 			 "cannot reach the flash window.\n");
 		return 1;
 	}
+	/* size the ROM BAR the PCI way: all-ones, read the mask back
+	 * (mask off the enable bit - the card's forced-enable hack
+	 * sets it even on the sizing write) */
+	rpci_write_long(dev, PCI_ROM_ADDRESS, 0xffffffff);
+	gfxati_rom_window_size =
+		(size_t)(0xffffffffu - (pci_read_long(dev, PCI_ROM_ADDRESS) &
+					PCI_ROM_ADDRESS_MASK)) + 1;
+	rpci_write_long(dev, PCI_ROM_ADDRESS,
+			rom_base | PCI_ROM_ADDRESS_ENABLE);
+	msg_pinfo("gfxati: ROM window 0x%zx bytes at 0x%lx\n",
+		  gfxati_rom_window_size, (unsigned long)rom_base);
+	if (gfxati_rom_window_size < 4096) {
+		msg_perr("gfxati: implausible ROM window size.\n");
+		return 1;
+	}
 	gfxati_romwin = rphysmap("ATI R5xx flash window", rom_base,
-				 GFXATI_ROM_WINDOW_SIZE);
+				 gfxati_rom_window_size);
 	if (gfxati_romwin == ERROR_PTR)
 		return 1;
 
@@ -334,8 +454,8 @@ static int gfxati_init(struct flashprog_programmer *const prog)
 		gfxati_trigger(0x04, 0);
 	}
 
-	return register_spi_master(&spi_master_gfxati, GFXATI_ROM_WINDOW_SIZE,
-				   NULL);
+	return register_spi_master(&spi_master_gfxati,
+				   gfxati_rom_window_size, NULL);
 }
 
 const struct programmer_entry programmer_gfxati = {
