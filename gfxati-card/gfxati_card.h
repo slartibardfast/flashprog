@@ -6,7 +6,7 @@
 
 /*
  * The R5xx (Rialto) flash interface, from plan/0003#gfxati-interface.
- * Grounded MMIO map (atiflash 3.49 decompile + rig traces):
+ * Grounded MMIO map (atiflash v3.49 decompile + rig traces):
  *   - MM_INDEX 0xA0 / MM_DATA 0xA4 indirect pair (Rialto)
  *   - MM_INDEX 0x008 / MM_DATA 0x00C legacy pair (R300-compat, the
  *     R580's descriptor engine uses it for the SEPROM at indices 0x80/0x81)

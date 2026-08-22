@@ -2,14 +2,14 @@
 ## The FreeDOS rig (plan/0003#gfxati-flash-rig)
 
 `rig/fat12.py` (FAT12/FAT16 floppy and disk-image reader/writer, partition
-offset aware) and `rig/rig.py` (prep + run) boot FreeDOS 1.4 LiteUSB with
+offset aware) and `rig/rig.py` (prep + run) boot FreeDOS v1.4 LiteUSB with
 the stub card, run a real era atiflash from the autoexec, and verify the
 flash workflow. Build deps: qemu with the gfxati device (see above), the
-FreeDOS 1.4 LiteUSB image (download.freedos.org/1.4/FD14-LiteUSB.zip), a
+FreeDOS v1.4 LiteUSB image (download.freedos.org/1.4/FD14-LiteUSB.zip), a
 go32v2-era atiflash build, CWSDPMI, and the vbios image.
 
 Status (2026-08-15): the harness works end to end - FreeDOS boots from the
-prepped image, the autoexec runs, result files extract - but atiflash 3.49
+prepped image, the autoexec runs, result files extract - but atiflash v3.49
 produces no output at all in this environment: no stdout (empty redirects),
 no files (even with -d), no VGA text, no graphics mode. The exe is a valid
 go32v2 binary (go32stub v2.02T, embedded CWSDPMI r5); the batch markers
@@ -33,9 +33,9 @@ rig.py's prep now adds FreeCom's `/N` swap-disable switch to the SHELL=
 line in FDCONFIG.SYS, which eliminates the TSR crash (verified: CWSDPMI
 loads and runs clean with the fix).
 
-### MS-DOS 6.22 host (the operator's procedure, 2026-08-16)
+### MS-DOS v6.22 host (the operator's procedure, 2026-08-16)
 
-The operator's fixed run matrix boots MS-DOS 6.22 cleanly to the A:\>
+The operator's fixed run matrix boots MS-DOS v6.22 cleanly to the A:\>
 prompt (R0 passes: -machine pc,graphics=off -m 16 -fda only -boot a,
 CONFIG.SYS = HIMEM.SYS /TESTMEM:OFF + DOS=HIGH + FILES/BUFFERS, A20=1,
 no hda, no card). Earlier A20=0 boot sticks were artifacts of the

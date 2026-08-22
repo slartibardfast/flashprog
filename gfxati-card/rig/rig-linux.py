@@ -70,13 +70,13 @@ if [ "$NEGATIVE" = "1" ]; then
 	exit 0
 fi
 if [ "$SCENARIO" = "ssid-guard" ]; then
-	echo "=== guard pass 1: a blank-SSID image with strap bytes ==="
+	echo "=== guard 1: write the blank-SSID image with strap bytes ==="
 	$FP -p gfxati -c 'AT25F1024(A)' -w /rig/ssid-a.bin
 	echo "RIG-STAGE1-EXIT=$?"
-	echo "=== guard pass 2: a differing SSID onto the blank card must be refused ==="
+	echo "=== guard 2: a differing SSID onto the blank card is refused ==="
 	$FP -p gfxati -c 'AT25F1024(A)' -w /rig/ssid-b.bin
 	echo "RIG-STAGE2-EXIT=$?"
-	echo "=== guard pass 3: --force overrides (the card was erased by pass 2; B lands as-is) ==="
+	echo "=== guard 3: --force overrides (the card sits erased after guard 2; B lands as-is) ==="
 	$FP -p gfxati -c 'AT25F1024(A)' --force -w /rig/ssid-b.bin
 	echo "RIG-STAGE3-EXIT=$?"
 	$FP -p gfxati -c 'AT25F1024(A)' -r /rig/readback.bin
@@ -86,7 +86,7 @@ if [ "$SCENARIO" = "ssid-guard" ]; then
 	else
 		echo "RIG-FORCE-MISMATCH"
 	fi
-	echo "=== guard pass 5: a card that carries an SSID crossflashes freely ==="
+	echo "=== guard 5: a card that carries an SSID crossflashes freely ==="
 	$FP -p gfxati -c 'AT25F1024(A)' -w /rig/ssid-a2.bin
 	echo "RIG-STAGE5-EXIT=$?"
 	$FP -p gfxati -c 'AT25F1024(A)' -w /rig/ssid-c.bin

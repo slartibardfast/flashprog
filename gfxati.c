@@ -20,7 +20,7 @@
  * specification from plan/0002#port-spec).
  *
  * The interface, rig-verified against the QEMU gfxati-card stub by
- * thirteen builds of the original atiflash (3.25 through 4.07):
+ * thirteen builds of the original atiflash (v3.25 through v4.07):
  *
  *   - BAR0 MMIO carries the MM_INDEX 0xA0 / MM_DATA 0xA4 indirect
  *     pair; every register access is index -> 0xA0, data -> 0xA4,

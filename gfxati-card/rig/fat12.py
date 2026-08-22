@@ -261,7 +261,7 @@ if __name__ == '__main__':
 def make_fat16_disk(size_mb=32, part_lba=63):
     """Build a fresh FAT16 disk image from scratch (MBR + one partition).
     The partition is FAT16 with a DOS-style boot sector; the data area is
-    empty (files are added with write_file). Used to give MS-DOS 6.22 a
+    empty (files are added with write_file). Used to give MS-DOS v6.22 a
     clean payload disk - the FreeDOS Lite partition triggers a boot stick
     in the MS-DOS IO.SYS drive setup."""
     import math

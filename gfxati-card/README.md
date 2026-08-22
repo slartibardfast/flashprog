@@ -4,7 +4,7 @@ A QEMU PCI device presenting the R520/R580 identity, the R5xx (Rialto)
 flash interface registers, and the ROM window backed by the flash model.
 The interface contract is the map in plan/0003-gfxati-flash-stub (the
 R5xx interface map section); the register offsets are grounded in the
-atiflash 3.49 decompile.
+atiflash v3.49 decompile.
 
 ## Layout
 
@@ -39,7 +39,7 @@ in this cut: every command completes instantly).
 
 Open item (recorded in the plan): the MMIO offset of the flash window
 address register — the vtable slot that receives the 0x9000000-relative
-window values is not in the 3.49 C listing. This cut serves the flash
+window values is not in the v3.49 C listing. This cut serves the flash
 through the ROM window directly (the parallel path, which the decompile
 grounds: CParallel reads and JEDEC sequences go through the window). The
 window register is expected to surface as a concrete gap when real

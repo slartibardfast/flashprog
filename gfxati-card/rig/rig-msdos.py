@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The MS-DOS 6.22 rig (plan/0003#gfxati-flash-rig): boot MS-DOS with the
+"""The MS-DOS v6.22 rig (plan/0003#gfxati-flash-rig): boot MS-DOS with the
 stub card and a real era atiflash, then attest the flash workflow end to
 end: -i reports the stub card and its chip, -p programs a vbios image,
 -s saves the ROM back, and the read-back matches the written image byte
@@ -12,7 +12,7 @@ Prep + run:
 The boot floppy (A:) carries the minimal CONFIG.SYS (HIMEM.SYS
 /TESTMEM:OFF + FILES/BUFFERS + DOS=HIGH) and the AUTOEXEC batch; the
 payload floppy (B:) carries the flasher, the vbios image, and receives
-RES.TXT + READBACK.BIN. The rig images are the MS-DOS 6.22 disk image
+RES.TXT + READBACK.BIN. The rig images are the MS-DOS v6.22 disk image
 itself as the FAT12 base (archive.org item dos-6.22, Dos6.22.img,
 sha256 1ab300a0a54b8f384cc457424ea0d2f3f46bef11c0172429c6b207b2ec539e6e)
 - hand-formatted floppies read as garbage to the guest.
