@@ -93,9 +93,25 @@ static const char *const gfxati_strap_names[16] = {
 static uint8_t *gfxati_mmio;
 static uint8_t *gfxati_romwin;
 
-/* The indirect pair: index, data, re-assert the index. */
+/* The R6xx-class cards map CNTL1/CNTL2 at the direct MMIO offsets
+ * 0x1C0/0x1C4; the R5xx route is the MM_INDEX/MM_DATA indirect
+ * pair. The default is auto: the direct registers are probed by
+ * writing the idle chip-select and reading it back, and the
+ * indirect pair is the fallback - whatever answers, wins. The
+ * regs= parameter forces a route (direct or indirect). */
+static int gfxati_use_direct = -1;	/* -1 auto, 1 direct, 0 indirect */
+
+#define GFXATI_CNTL1_DIRECT	0x1C0
+#define GFXATI_CNTL2_DIRECT	0x1C4
+
 static uint32_t gfxati_reg_read(uint32_t index)
 {
+	if (gfxati_use_direct == 1) {
+		if (index == GFXATI_SEPROM_CNTL1_INDEX)
+			return pci_mmio_readl(gfxati_mmio + GFXATI_CNTL1_DIRECT);
+		if (index == GFXATI_SEPROM_CNTL2_INDEX)
+			return pci_mmio_readl(gfxati_mmio + GFXATI_CNTL2_DIRECT);
+	}
 	pci_mmio_writel(index, gfxati_mmio + GFXATI_MM_INDEX);
 	pci_mmio_writel(index, gfxati_mmio + GFXATI_MM_INDEX);
 	return pci_mmio_readl(gfxati_mmio + GFXATI_MM_DATA);
@@ -103,9 +119,27 @@ static uint32_t gfxati_reg_read(uint32_t index)
 
 static void gfxati_reg_write(uint32_t index, uint32_t val)
 {
+	if (gfxati_use_direct == 1) {
+		if (index == GFXATI_SEPROM_CNTL1_INDEX) {
+			pci_mmio_writel(val, gfxati_mmio + GFXATI_CNTL1_DIRECT);
+			return;
+		}
+		if (index == GFXATI_SEPROM_CNTL2_INDEX) {
+			pci_mmio_writel(val, gfxati_mmio + GFXATI_CNTL2_DIRECT);
+			return;
+		}
+	}
 	pci_mmio_writel(index, gfxati_mmio + GFXATI_MM_INDEX);
 	pci_mmio_writel(val, gfxati_mmio + GFXATI_MM_DATA);
 	pci_mmio_writel(index, gfxati_mmio + GFXATI_MM_INDEX);
+}
+
+/* Probe the direct route: write the idle chip-select through the
+ * direct offset and check the read-back echoes it. */
+static int gfxati_direct_route_works(void)
+{
+	pci_mmio_writel(GFXATI_CS_BIT, gfxati_mmio + GFXATI_CNTL1_DIRECT);
+	return pci_mmio_readl(gfxati_mmio + GFXATI_CNTL1_DIRECT) == GFXATI_CS_BIT;
 }
 
 static void gfxati_cntl1(uint32_t val)
@@ -381,6 +415,25 @@ static int gfxati_init(struct flashprog_programmer *const prog)
 	uint32_t rom, strap;
 	const char *strap_name;
 
+	{
+		char *arg = extract_programmer_param("regs");
+		if (arg) {
+			if (strcmp(arg, "direct") == 0) {
+				gfxati_use_direct = 1;
+			} else if (strcmp(arg, "indirect") == 0) {
+				gfxati_use_direct = 0;
+			} else if (strcmp(arg, "auto") == 0) {
+				gfxati_use_direct = -1;
+			} else {
+				msg_perr("gfxati: regs must be direct, indirect, "
+					 "or auto.\n");
+				free(arg);
+				return 1;
+			}
+			free(arg);
+		}
+	}
+
 	dev = pcidev_init(gfxati_devices, PCI_BASE_ADDRESS_0);
 	if (!dev)
 		return 1;
@@ -439,6 +492,12 @@ static int gfxati_init(struct flashprog_programmer *const prog)
 	strap_name = gfxati_strap_names[strap];
 	msg_pinfo("gfxati: strap 0x%X (%s)\n", strap,
 		  strap_name ? strap_name : "unknown");
+
+	/* Resolve the register route */
+	if (gfxati_use_direct == -1)
+		gfxati_use_direct = gfxati_direct_route_works();
+	msg_pinfo("gfxati: %s register route\n",
+		  gfxati_use_direct == 1 ? "direct" : "indirect");
 
 	/* Idle: chip select deasserted, no window mode armed. */
 	gfxati_arm(GFXATI_CS_BIT);

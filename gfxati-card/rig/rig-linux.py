@@ -59,10 +59,12 @@ $BB mount -t sysfs sysfs /sys 2>/dev/null
 $BB mount -t devtmpfs dev /dev 2>/dev/null
 . /rig/scenario
 echo "RIG-BOOT linux-guest scenario=$SCENARIO chip=$QCHIP strap=$QSTRAP"
-FP="/rig/ld-linux-x86-64.so.2 --library-path /rig /rig/flashprog $CHIPARGS"
+PROG="gfxati"
+[ -n "$PROGSUFFIX" ] && PROG="$PROG:$PROGSUFFIX"
+FP="/rig/ld-linux-x86-64.so.2 --library-path /rig /rig/flashprog -p $PROG $CHIPARGS"
 if [ "$NEGATIVE" = "1" ]; then
 	echo "=== negative: wrong chip forced ==="
-	$FP -p gfxati
+	$FP
 	echo "RIG-ID-EXIT=$?"
 	echo "RIG-DONE"
 	$BB sleep 1
@@ -71,15 +73,15 @@ if [ "$NEGATIVE" = "1" ]; then
 fi
 if [ "$SCENARIO" = "ssid-guard" ]; then
 	echo "=== guard 1: write the blank-SSID image with strap bytes ==="
-	$FP -p gfxati -c 'AT25F1024(A)' -w /rig/ssid-a.bin
+	$FP -c 'AT25F1024(A)' -w /rig/ssid-a.bin
 	echo "RIG-STAGE1-EXIT=$?"
 	echo "=== guard 2: a differing SSID onto the blank card is refused ==="
-	$FP -p gfxati -c 'AT25F1024(A)' -w /rig/ssid-b.bin
+	$FP -c 'AT25F1024(A)' -w /rig/ssid-b.bin
 	echo "RIG-STAGE2-EXIT=$?"
 	echo "=== guard 3: --force overrides (the card sits erased after guard 2; B lands as-is) ==="
-	$FP -p gfxati -c 'AT25F1024(A)' --force -w /rig/ssid-b.bin
+	$FP -c 'AT25F1024(A)' --force -w /rig/ssid-b.bin
 	echo "RIG-STAGE3-EXIT=$?"
-	$FP -p gfxati -c 'AT25F1024(A)' -r /rig/readback.bin
+	$FP -c 'AT25F1024(A)' -r /rig/readback.bin
 	echo "RIG-STAGE4-EXIT=$?"
 	if $BB cmp -s /rig/ssid-b.bin /rig/readback.bin; then
 		echo "RIG-FORCE-AS-IS"
@@ -87,9 +89,9 @@ if [ "$SCENARIO" = "ssid-guard" ]; then
 		echo "RIG-FORCE-MISMATCH"
 	fi
 	echo "=== guard 5: a card that carries an SSID crossflashes freely ==="
-	$FP -p gfxati -c 'AT25F1024(A)' -w /rig/ssid-a2.bin
+	$FP -c 'AT25F1024(A)' -w /rig/ssid-a2.bin
 	echo "RIG-STAGE5-EXIT=$?"
-	$FP -p gfxati -c 'AT25F1024(A)' -w /rig/ssid-c.bin
+	$FP -c 'AT25F1024(A)' -w /rig/ssid-c.bin
 	echo "RIG-STAGE6-EXIT=$?"
 	echo "RIG-DONE"
 	$BB sleep 1
@@ -97,13 +99,13 @@ if [ "$SCENARIO" = "ssid-guard" ]; then
 	exit 0
 fi
 echo "=== identify ==="
-$FP -p gfxati
+$FP
 echo "RIG-ID-EXIT=$?"
 echo "=== write ==="
-$FP -p gfxati -w "$IMAGE"
+$FP -w "$IMAGE"
 echo "RIG-WRITE-EXIT=$?"
 echo "=== read back ==="
-$FP -p gfxati -r /rig/readback.bin
+$FP -r /rig/readback.bin
 echo "RIG-READ-EXIT=$?"
 if $BB cmp -s "$IMAGE" /rig/readback.bin; then
 	echo "RIG-READBACK-MATCH"
@@ -277,6 +279,10 @@ def scenarios_from_chips():
 	scen.append(("M25P10-lying-strap", 8, 9, "-c M25P10",
 		     "img-8.bin", False))
 	scen.append(("ssid-guard", 3, 9, "", "ssid-a.bin", 3))
+	scen.append(("direct-route-AT25F1024", 3, 9,
+		     "-c AT25F1024(A)", "rom-pad.bin", 4))
+	scen.append(("indirect-route-AT25F1024", 3, 9,
+		     "-c AT25F1024(A)", "rom-pad.bin", 5))
 	scen.append(("negative-wrong-chip", 3, 9, "-c MX25L512",
 		     "rom-pad.bin", 1))
 	return scen
@@ -339,7 +345,10 @@ def prep_matrix(flashprog, vbios, outdir):
 		with open(outdir + '/scenario-%s' % name, 'w') as f:
 			f.write("SCENARIO=%s\nQCHIP=%d\nQSTRAP=%d\n"
 				"CHIPARGS='%s'\nIMAGE=/rig/%s\nNEGATIVE=%d\n"
-				% (name, chip, strap, chipargs, image, neg or 0))
+				"PROGSUFFIX=%s\n"
+				% (name, chip, strap, chipargs, image, neg or 0,
+				   "regs=direct" if neg == 4 else
+				   ("regs=indirect" if neg == 5 else "")))
 	print('prep: matrix ready in %s' % outdir)
 	build_initrd(outdir)
 
@@ -408,6 +417,25 @@ def run_scenario(outdir, qemu, name, chip, strap, chipargs, image, neg,
 			if ok:
 				print('ok: %s (guard: refuse/force/preserve/'
 				      'crossflash)' % name)
+			return ok
+		if neg == 4 or neg == 5:
+			route = ('direct' if neg == 4 else 'indirect')
+			checks = [
+				('%s route selected' % route,
+				 ('gfxati: %s register route' % route) in text),
+				('identified', 'RIG-ID-EXIT=0' in text),
+				('erase+write', 'Erase/write done.' in text),
+				('verified', 'VERIFIED.' in text),
+				('read back', 'RIG-READ-EXIT=0' in text),
+				('byte-identical', 'RIG-READBACK-MATCH' in text),
+			]
+			ok = True
+			for what, passed in checks:
+				if not passed:
+					print('FAIL %s: %s' % (name, what))
+					ok = False
+			if ok:
+				print('ok: %s (%s route, all checks)' % (name, route))
 			return ok
 		if neg == 1:
 			ok = 'RIG-ID-EXIT=1' in text
