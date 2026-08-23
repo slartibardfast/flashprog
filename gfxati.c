@@ -334,7 +334,16 @@ static int gfxati_spi_read(struct flashctx *flash, uint8_t *buf,
 			   unsigned int start, unsigned int len)
 {
 	/* The array window is the fast read path: with no mode armed
-	 * the ROM BAR is the flash contents as plain memory. */
+	 * the ROM BAR is the flash contents as plain memory. The
+	 * bounds check is defense in depth: flashprog respects the
+	 * registered max decode, and this keeps a bug elsewhere from
+	 * reading past the mapping. */
+	if (start > gfxati_rom_window_size || len > gfxati_rom_window_size - start) {
+		msg_perr("gfxati: read beyond the flash window "
+			 "(0x%x+0x%x of 0x%zx).\n", start, len,
+			 gfxati_rom_window_size);
+		return 1;
+	}
 	gfxati_arm(GFXATI_CS_BIT);
 	memcpy(buf, gfxati_romwin + start, len);
 	return 0;
