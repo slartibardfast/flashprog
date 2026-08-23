@@ -184,16 +184,19 @@ static void seprom_cntl1_write(struct gfxati_card *c, uint32_t val)
 	if (cs != !!(c->seprom_cntl1 & GFXATI_CS_BIT)) {
 		gfxati_flash_cs(&c->flash, cs);
 	}
+	/* any re-arm closes an open stream (page program or raw):
+	 * the model's transaction boundary is lazy, and the next arm
+	 * may be the idle CS-BIT rather than another 0x09 mode */
+	if (c->win_stream_open) {
+		gfxati_flash_cs(&c->flash, 1);
+		c->win_stream_open = 0;
+	}
+
 	if (val & GFXATI_SEPROM_WINDOW_TAG) {
 		c->seprom_window = val & ~1u;
 	}
 	if ((val & 0x0f000000) == 0x09000000) {
 		uint32_t sub = val & ~GFXATI_CS_BIT & 0xffff;
-		if (c->win_stream_open) {
-			/* the page-program stream closes when the mode ends */
-			gfxati_flash_cs(&c->flash, 1);
-			c->win_stream_open = 0;
-		}
 		/* a mode re-arm ends any latched identification */
 		c->spi_id_latch = 0;
 		if (sub == 0x00000 || sub == 0x00200) {
@@ -202,6 +205,11 @@ static void seprom_cntl1_write(struct gfxati_card *c, uint32_t val)
 			c->win_mode = 1;
 		} else if (sub == 0x00010) {
 			c->win_mode = 2;	/* status window */
+		} else if (sub == 0x00800) {
+			/* raw stream: CNTL2 carries the opcode; window
+			 * writes shift raw SPI bytes (the AT45 buffer
+			 * operations ride this) */
+			c->win_mode = 4;
 		} else {
 			c->win_mode = 3;	/* one-shot opcode (WREN et al.) */
 		}
@@ -366,10 +374,12 @@ void gfxati_card_mmio_write(struct gfxati_card *c, uint32_t off, uint32_t val)
 uint8_t gfxati_card_rom_read(struct gfxati_card *c, uint32_t addr)
 {
 	if (c->win_mode == 2) {
-		/* status window: a fresh RDSR */
+		/* status window: a fresh RDSR, or the opcode CNTL2
+		 * carries when armed with one (the AT45 D7 status) */
 		uint8_t s;
+		uint8_t op = (c->seprom_cntl2 >> 16) & 0xff;
 		gfxati_flash_cs(&c->flash, 0);
-		gfxati_flash_spi_xfer(&c->flash, 0x05);
+		gfxati_flash_spi_xfer(&c->flash, op ? op : 0x05);
 		s = gfxati_flash_spi_xfer(&c->flash, 0xff);
 		gfxati_flash_cs(&c->flash, 1);
 		TRACE("win status read => %02x\n", s);
@@ -399,6 +409,18 @@ void gfxati_card_rom_write(struct gfxati_card *c, uint32_t addr, uint8_t val)
 	 * family's convention: writes exit ID mode) */
 	c->spi_id_latch = 0;
 	switch (c->win_mode) {
+	case 4: {
+		/* raw stream: one chip-select cycle; the opcode came
+		 * from CNTL2, the window bytes are raw SPI data */
+		if (!c->win_stream_open) {
+			uint8_t op = (c->seprom_cntl2 >> 16) & 0xff;
+			gfxati_flash_cs(&c->flash, 0);
+			gfxati_flash_spi_xfer(&c->flash, op);
+			c->win_stream_open = 1;
+		}
+		gfxati_flash_spi_xfer(&c->flash, val);
+		break;
+	}
 	case 1:
 		/* program stream: one long page-program through the window;
 		 * the command "reset" write (offset 0, value 0) does not

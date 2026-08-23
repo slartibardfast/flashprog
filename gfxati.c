@@ -64,6 +64,7 @@
 #define GFXATI_WIN_PROGRAM		0x09000000	/* sub 0x000/0x200 */
 #define GFXATI_WIN_STATUS		0x09000010	/* sub 0x010 */
 #define GFXATI_WIN_TRIGGER		0x09000001	/* any other sub */
+#define GFXATI_WIN_RAWSTREAM		0x09000800	/* raw stream, CNTL2 opcode */
 
 #define GFXATI_MMIO_SIZE		0x8000
 
@@ -215,8 +216,14 @@ static int gfxati_spi_command(const struct spi_master *mst, unsigned int writecn
 	}
 
 	/* The single readable status is RDSR through the status window;
-	 * every read answers a fresh transaction. */
-	if (opcode == 0x05 && readcnt >= 1 && writecnt == 1) {
+	 * every read answers a fresh transaction. The AT45 status (D7)
+	 * rides the same window with its opcode in CNTL2. */
+	if ((opcode == 0x05 || opcode == 0xd7) && readcnt >= 1 &&
+	    writecnt == 1) {
+		if (opcode == 0xd7)
+			gfxati_cntl2((uint32_t)opcode << 16);
+		else
+			gfxati_cntl2(0);
 		unsigned int i;
 
 		gfxati_arm(GFXATI_WIN_STATUS);
@@ -277,8 +284,27 @@ static int gfxati_spi_command(const struct spi_master *mst, unsigned int writecn
 	case 0x62:
 	case 0xc7:
 	case 0xd8:
+	case 0x81:
+	case 0x50:
 		gfxati_capture_identity();
 		break;
+	}
+
+	/* Write-only multi-byte commands that are not page program
+	 * ride the raw stream: CNTL2 carries the opcode, the window
+	 * shifts the remaining bytes in one chip-select cycle (the
+	 * AT45 buffer operations and addressed erases). */
+	if (readcnt == 0 && writecnt >= 2 && opcode != 0x02 &&
+	    opcode != 0x05 && opcode != 0xad) {
+		unsigned int i;
+
+		gfxati_cntl2((uint32_t)opcode << 16);
+		gfxati_arm(GFXATI_WIN_RAWSTREAM);
+		for (i = 1; i < writecnt; i++)
+			gfxati_romwin[0] = writearr[i];
+		gfxati_arm(GFXATI_CS_BIT);
+		gfxati_cntl2(0);
+		return gfxati_wait_busy();
 	}
 
 	/* Everything else is a single-operand trigger: WREN, WRDI,
@@ -397,6 +423,56 @@ static const struct spi_master spi_master_gfxati = {
 	 * AAI hook falls back to the PP writer. */
 	.write_aai	= default_spi_write_256,
 	.probe_opcode	= default_spi_probe_opcode,
+};
+
+/* The parallel family rides the same window: with no mode armed,
+ * reads serve the array and writes run the JEDEC command sequences
+ * (the unlock cycles, the 90H id entry, the A0H byte program) -
+ * the card model has served them since plan/0003, and the era's
+ * parallel flashers drove exactly these sequences. Note: the SSID
+ * guard lives on the SPI write path; parallel writes carry no
+ * guard (the R300-era cards predate the SSID convention). */
+/* The flash already sits in the mapped window at offset zero; the
+ * map hook hands flashprog that mapping instead of letting it map
+ * the fallback top-of-memory address. */
+static void *gfxati_par_map(const char *descr, uintptr_t phys_addr,
+			    size_t len)
+{
+	msg_pinfo("gfxati: par map 0x%zx bytes (phys hint 0x%lx)\n",
+		  len, (unsigned long)phys_addr);
+	if (len > gfxati_rom_window_size)
+		return ERROR_PTR;
+	return gfxati_romwin;
+}
+
+static void gfxati_par_unmap(void *virt_addr, size_t len)
+{
+	/* the window lives and dies with the programmer */
+}
+
+static void gfxati_par_writeb(const struct par_master *par, uint8_t val,
+			      chipaddr addr)
+{
+	gfxati_romwin[addr - (chipaddr)gfxati_romwin] = val;
+}
+
+static uint8_t gfxati_par_readb(const struct par_master *par,
+				const chipaddr addr)
+{
+	return gfxati_romwin[addr - (chipaddr)gfxati_romwin];
+}
+
+static const struct par_master par_master_gfxati = {
+	.chip_readb	= gfxati_par_readb,
+	.chip_readw	= fallback_chip_readw,
+	.chip_readl	= fallback_chip_readl,
+	.chip_readn	= fallback_chip_readn,
+	.chip_writeb	= gfxati_par_writeb,
+	.chip_writew	= fallback_chip_writew,
+	.chip_writel	= fallback_chip_writel,
+	.chip_writen	= fallback_chip_writen,
+	.map_flash	= gfxati_par_map,
+	.unmap_flash	= gfxati_par_unmap,
 };
 
 static const struct dev_entry gfxati_devices[] = {
@@ -519,7 +595,13 @@ static int gfxati_init(struct flashprog_programmer *const prog)
 		gfxati_trigger(0x04, 0);
 	}
 
-	return register_spi_master(&spi_master_gfxati,
+	{
+		int ret = register_spi_master(&spi_master_gfxati,
+					       gfxati_rom_window_size, NULL);
+		if (ret)
+			return ret;
+	}
+	return register_par_master(&par_master_gfxati, BUS_PARALLEL, 0,
 				   gfxati_rom_window_size, NULL);
 }
 

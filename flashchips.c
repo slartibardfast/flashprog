@@ -2105,7 +2105,7 @@ const struct flashchip flashchips[] = {
 		.bustype	= BUS_PARALLEL,
 		.id.type	= ID_JEDEC,
 		.id.manufacture	= ATMEL_ID,
-		.id.model	= 0x04,
+		.id.model	= ATMEL_AT49F001N,
 		.total_size	= 128,
 		.page_size	= 128,
 		.feature_bits	= FEATURE_EITHER_RESET,
@@ -2121,6 +2121,8 @@ const struct flashchip flashchips[] = {
 		.write		= write_jedec,
 		.read		= read_memmapped,
 		.voltage	= {4500, 5500},
+		.prepare_access	= prepare_memory_access,
+		.finish_access	= finish_memory_access,
 	},
 
 	{
@@ -2130,7 +2132,7 @@ const struct flashchip flashchips[] = {
 		.bustype	= BUS_PARALLEL,
 		.id.type	= ID_JEDEC,
 		.id.manufacture	= ATMEL_ID,
-		.id.model	= 0x05,
+		.id.model	= ATMEL_AT49F001NT,
 		.total_size	= 128,
 		.page_size	= 128,
 		.feature_bits	= FEATURE_EITHER_RESET,
@@ -2146,6 +2148,8 @@ const struct flashchip flashchips[] = {
 		.write		= write_jedec,
 		.read		= read_memmapped,
 		.voltage	= {4500, 5500},
+		.prepare_access	= prepare_memory_access,
+		.finish_access	= finish_memory_access,
 	},
 
 	{
@@ -2171,6 +2175,8 @@ const struct flashchip flashchips[] = {
 		.write		= write_jedec,
 		.read		= read_memmapped,
 		.voltage	= {3000, 3600},
+		.prepare_access	= prepare_memory_access,
+		.finish_access	= finish_memory_access,
 	},
 
 	{
@@ -2200,6 +2206,8 @@ const struct flashchip flashchips[] = {
 		.write		= write_jedec,
 		.read		= read_memmapped,
 		.voltage	= {4500, 5500},
+		.prepare_access	= prepare_memory_access,
+		.finish_access	= finish_memory_access,
 	},
 
 	{
@@ -2229,6 +2237,36 @@ const struct flashchip flashchips[] = {
 		.write		= write_jedec,
 		.read		= read_memmapped,
 		.voltage	= {3000, 3600},
+		.prepare_access	= prepare_memory_access,
+		.finish_access	= finish_memory_access,
+	},
+
+	{
+		/* The atiflash-catalog M29F512B (the model row emits the
+		 * ST sibling id 20 24; chip-erase topology only). */
+		.vendor		= "ST",
+		.name		= "M29F512B",
+		.bustype	= BUS_PARALLEL,
+		.id.type	= ID_JEDEC,
+		.id.manufacture	= ST_ID,
+		.id.model	= 0x24,
+		.total_size	= 64,
+		.page_size	= 128,
+		.feature_bits	= FEATURE_EITHER_RESET,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= 10,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {64 * 1024, 1} },
+				.block_erase = erase_chip_block_jedec,
+			}
+		},
+		.write		= write_jedec_1,
+		.read		= read_memmapped,
+		.voltage	= {4500, 5500},
+		.prepare_access	= prepare_memory_access,
+		.finish_access	= finish_memory_access,
 	},
 
 	{

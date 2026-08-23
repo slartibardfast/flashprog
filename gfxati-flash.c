@@ -21,6 +21,7 @@ enum gfxati_spi_state {
 	SPI_AAI_DATA,
 	SPI_AT45_BUF_ADDR,
 	SPI_AT45_BUF_WRITE,
+	SPI_AT45_STATUS,
 	SPI_AT45_PAGE_ADDR,
 };
 
@@ -104,13 +105,13 @@ static uint32_t at45_page_count(const struct gfxati_flash_chip *chip)
 
 static uint32_t at45_linear(const struct gfxati_flash *f)
 {
-	uint32_t page = (f->addr >> 9) % at45_page_count(f->chip);
-	uint32_t offset = f->addr & 0x1FF;
+	uint32_t page = (f->addr >> 8) % at45_page_count(f->chip);
+	uint32_t offset = f->addr & 0xFF;
 
-	if (offset >= 264) {
+	if (offset >= 256) {
 		offset = 263;
 	}
-	return page * 264 + offset;
+	return page * 256 + offset;
 }
 
 static void at45_flush_buffer_to_page(struct gfxati_flash *f, int with_erase)
@@ -121,10 +122,10 @@ static void at45_flush_buffer_to_page(struct gfxati_flash *f, int with_erase)
 		return;
 	}
 	if (with_erase) {
-		memset(f->mem + page * 264, 0xFF, 264);
+		memset(f->mem + page * 256, 0xFF, 256);
 	}
-	for (uint32_t i = 0; i < 264; i++) {
-		f->mem[page * 264 + i] &= f->at45_buffer[i];
+	for (uint32_t i = 0; i < 256; i++) {
+		f->mem[page * 256 + i] &= f->at45_buffer[i];
 	}
 }
 
@@ -215,16 +216,16 @@ static void spi_addr_complete(struct gfxati_flash *f)
 		f->state = SPI_REMS;
 		break;
 	case 0x81:
-		if (f->wren && (f->chip->quirks & GFXATI_Q_AT45)) {
-			erase_block(f, ((f->addr >> 9) % at45_page_count(f->chip)) * 264, 264);
-			f->wren = 0;
+		if (f->chip->quirks & GFXATI_Q_AT45) {
+			/* the AT45 parts have no WREN - erases take the
+			 * page address directly */
+			erase_block(f, ((f->addr >> 8) % at45_page_count(f->chip)) * 256, 256);
 		}
 		f->state = SPI_IDLE;
 		break;
 	case 0x50:
-		if (f->wren && (f->chip->quirks & GFXATI_Q_AT45)) {
-			erase_block(f, ((f->addr >> 9) % at45_page_count(f->chip)) * 264, 8 * 264);
-			f->wren = 0;
+		if (f->chip->quirks & GFXATI_Q_AT45) {
+			erase_block(f, ((f->addr >> 8) % at45_page_count(f->chip)) * 256, 8 * 256);
 		} else if (f->wren && chip_has_erase(f->chip, 0x50)) {
 			erase_region(f, 0x20, f->addr);
 			f->wren = 0;
@@ -233,16 +234,24 @@ static void spi_addr_complete(struct gfxati_flash *f)
 		break;
 	case 0x84:
 		f->at45_page = 0;
-		f->addr &= 0x1FF;
-		if (f->addr >= 264) {
+		f->addr &= 0xFF;
+		if (f->addr >= 256) {
 			f->addr = 0;
 		}
 		f->out_idx = f->addr;
-		memset(f->at45_buffer, 0xFF, sizeof(f->at45_buffer));
+		/* a fill at offset 0 starts a fresh buffer; a fill at a
+		 * higher offset continues (flashprog chunks a page
+		 * across multiple buffer-write commands) */
+		if (f->addr == 0) {
+			memset(f->at45_buffer, 0xFF, sizeof(f->at45_buffer));
+		}
 		f->state = SPI_AT45_BUF_WRITE;
 		break;
 	case 0x83:
-		f->at45_page = (f->addr >> 9) % at45_page_count(f->chip);
+	case 0x88:
+		/* buffer1 to page (0x83 with erase, 0x88 without -
+		 * flashprog erases first, so both flush identically) */
+		f->at45_page = (f->addr >> 8) % at45_page_count(f->chip);
 		f->state = SPI_AT45_PAGE_ADDR;
 		break;
 	case 0xD2:
@@ -306,9 +315,17 @@ uint8_t gfxati_flash_spi_xfer(struct gfxati_flash *f, uint8_t in)
 			break;
 		case 0x84:
 		case 0x83:
+		case 0x88:
 		case 0xD2:
 			if (f->chip->quirks & GFXATI_Q_AT45) {
 				spi_begin(f, 0);
+			}
+			break;
+		case 0xD7:
+			/* the AT45 status register read: READY,
+			 * READY, unprotected, POWEROF2 - 256B pages*/
+			if (f->chip->quirks & GFXATI_Q_AT45) {
+				f->state = SPI_AT45_STATUS;
 			}
 			break;
 		case 0xAD:
@@ -399,6 +416,11 @@ uint8_t gfxati_flash_spi_xfer(struct gfxati_flash *f, uint8_t in)
 	case SPI_RDSR:
 		out = f->status | (f->wren ? GFXATI_STATUS_WEL : 0);
 		break;
+
+	case SPI_AT45_STATUS:
+		out = 0xAD;
+		break;
+		/* READY | POWEROF2: 256-byte pages */
 
 	case SPI_WRSR:
 		f->status = in & 0x7C;
@@ -632,13 +654,23 @@ void gfxati_flash_parallel_write(struct gfxati_flash *f, uint32_t addr, uint8_t 
 
 uint8_t gfxati_flash_parallel_read(struct gfxati_flash *f, uint32_t addr)
 {
-	/* A read while a page load pends closes the load window: the
-	 * real parts start their internal cycle on their own timing,
-	 * and any host observation (flashprog's toggle poll, the
-	 * verify pass) comes after the load ended. */
-	if (f->chip->bus == GFXATI_PARALLEL && f->program_mode &&
-	    f->par_load_count > 0)
-		gfxati_par_page_commit(f);
+	/* A read while a load pends closes the load window: the real
+	 * parts start their internal cycle on their own timing, and
+	 * any host observation (flashprog's toggle poll, the verify
+	 * pass) comes after the load ended. The same read ends a byte
+	 * stream: flashprog's per-byte writer programs one byte then
+	 * polls, and the next unlock's AA must decode as a command,
+	 * not stream data - without this, a data stream whose last
+	 * address is exactly 0x5554 swallows the next unlock's AA at
+	 * 0x5555 as consecutive data (the ~35 failing bytes in the
+	 * byte-family scenarios). */
+	if (f->chip->bus == GFXATI_PARALLEL && f->program_mode) {
+		if (f->par_load_count > 0)
+			gfxati_par_page_commit(f);
+		else
+			f->program_mode = 0;
+		f->par_stream_live = 0;
+	}
 
 	addr %= f->chip->size;
 
