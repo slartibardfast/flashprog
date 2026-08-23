@@ -358,15 +358,35 @@ fn test_parallel_chip(const struct gfxati_flash_chip *chip)
 		return;
 	}
 
-	gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
-	gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
-	gfxati_flash_parallel_write(&f, 0x5555, 0xA0);
-	gfxati_flash_parallel_write(&f, 0x1234, 0x5A);
-	gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
-	gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
-	gfxati_flash_parallel_write(&f, 0x5555, 0xA0);
-	gfxati_flash_parallel_write(&f, 0x4000, 0xB5);
-	if (mem[0x1234] != 0x5A || mem[0x4000] != 0xB5) {
+	if (chip->page_size > 1) {
+		/* AT29C page-load: a full page after one unlock+A0
+		 * programs together; the commit fires on page full or
+		 * when a different page (or a new unlock cycle) starts */
+		unsigned int i;
+		gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
+		gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
+		gfxati_flash_parallel_write(&f, 0x5555, 0xA0);
+		for (i = 0; i < chip->page_size; i++)
+			gfxati_flash_parallel_write(&f, 0x1000 + i,
+						    (uint8_t)(0x5A ^ i));
+	} else {
+		gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
+		gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
+		gfxati_flash_parallel_write(&f, 0x5555, 0xA0);
+		gfxati_flash_parallel_write(&f, 0x1234, 0x5A);
+		gfxati_flash_parallel_write(&f, 0x5555, 0xAA);
+		gfxati_flash_parallel_write(&f, 0x2AAA, 0x55);
+		gfxati_flash_parallel_write(&f, 0x5555, 0xA0);
+		gfxati_flash_parallel_write(&f, 0x4000, 0xB5);
+	}
+	if (chip->page_size > 1) {
+		unsigned int i;
+		for (i = 0; i < chip->page_size; i++)
+			if (mem[0x1000 + i] != (uint8_t)(0x5A ^ i)) {
+				fail(chip, "program");
+				return;
+			}
+	} else if (mem[0x1234] != 0x5A || mem[0x4000] != 0xB5) {
 		fail(chip, "program");
 		return;
 	}

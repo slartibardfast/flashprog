@@ -66,6 +66,18 @@ struct gfxati_flash {
 	int cmd_cycle;
 	int in_id_mode;
 	int program_mode;
+
+	/* AT29C-style page-load programming: after the unlock+A0
+	 * cycle, up to page_size bytes accumulate and program together
+	 * (the parts have no byte-wise mode). */
+	uint32_t par_load_addr[256];
+	uint8_t par_load_val[256];
+	int par_load_count;
+	uint32_t par_stream_last;	/* last byte-stream address + 1 */
+	int par_stream_live;
+	int par_unlock_pending;	/* a discontinuous AA seen mid-stream */
+	uint32_t par_pending_addr;
+	uint8_t par_pending_val;
 };
 
 void gfxati_flash_init(struct gfxati_flash *f, const struct gfxati_flash_chip *chip,

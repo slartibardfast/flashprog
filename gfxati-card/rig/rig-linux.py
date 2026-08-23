@@ -223,11 +223,31 @@ CHIPS = [
 	(30, "S25FL002D",    "256K", "S25FL002D",      "full",   "DB entry added (RES 11h; no JEDEC RDID)"),
 	(31, "S25FL004A",    "512K", "S25FL004A",      "full",   "JEDEC RDID 01 02 12 (Spansion)"),
 	(32, "AT45DB011D",   "128K", None,             "exclude","the window carries no AT45 buffer-opcode path (transport gap, #chip-set)"),
+	(33, "AT29C256",     "32K",  None,             "exclude","the model row carries no id bytes; unidentifiable until grounded"),
+	(34, "AT29C512",     "64K",  "AT29C512",       "full",   "JEDEC parallel, 1F 5D; the page-load proof"),
+	(35, "AT29C010A",    "128K", "AT29C010A",      "full",   "JEDEC parallel, 1F D5"),
+	(36, "AT29C020",     "256K", "AT29C020",       "full",   "JEDEC parallel, 1F DA"),
+	(37, "AT29C040A",    "512K", "AT29C040A",      "full",   "JEDEC parallel, 1F A4"),
+	(38, "AT49F512",     "64K",  None,             "exclude","the model row carries no id bytes"),
+	(39, "AT49F001N",    "128K", None,             "exclude","DB entry added (1F 04); the write_jedec_1 byte-program dispatch is not yet modeled end-to-end"),
+	(40, "AT49F001T",    "128K", None,             "exclude","DB entry added (1F 05); write_jedec_1 dispatch not yet modeled"),
+	(41, "AT49LV010",    "128K", None,             "exclude","DB entry added (1F 17); write_jedec_1 dispatch not yet modeled"),
+	(42, "MX29F001B",    "128K", None,             "exclude","JEDEC parallel, C2 19; the non-uniform boot-block topology and sector dispatch are not yet modeled"),
+	(43, "MX29F001T",    "128K", None,             "exclude","JEDEC parallel, C2 18; boot-block topology not yet modeled"),
+	(44, "MX29F512",     "64K",  None,             "exclude","the model row carries the ST sibling id (20 24); the write dispatch is not yet modeled"),
+	(45, "Pm39LV512R",   "64K",  None,             "exclude","the model row carries no id bytes"),
+	(46, "Pm39LV010R",   "128K", None,             "exclude","the model row carries no id bytes"),
+	(47, "SST39SF512",   "64K",  None,             "exclude","JEDEC parallel, BF B4; write_jedec_1 + 30H sector dispatch not yet modeled end-to-end"),
+	(48, "SST39SF010",   "128K", None,             "exclude","DB entry added (BF B5); write dispatch not yet modeled"),
+	(49, "SST39VF512",   "64K",  None,             "exclude","JEDEC parallel, BF D4; write dispatch not yet modeled"),
+	(50, "SST39VF010",   "128K", None,             "exclude","JEDEC parallel, BF D5; write dispatch not yet modeled"),
+	(51, "SST45LF010",   "128K", None,             "exclude","DB entry added (BF 42); write dispatch not yet modeled"),
 ]
 
 # strap values per family (the hint flashprog logs; the probe decides)
-FAMILY_STRAP = {"AT25F": 4, "M25P": 5, "MX": 5, "SST": 6, "W25": 7,
-		"S25FL": 5, "AT45": 4, "AT25S": 4}
+FAMILY_STRAP = {"AT25F": 4, "M25P": 5, "MX25L": 5, "SST25": 6, "W25": 7,
+		"S25FL": 5, "AT45": 4, "AT25S": 4, "AT29": 8, "AT49": 8,
+		"MX29": 8, "Pm39": 8, "SST39": 8, "SST45": 8}
 
 # the flash size in bytes per chip index, for image synthesis
 KB = 1024

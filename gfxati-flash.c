@@ -464,12 +464,34 @@ uint8_t gfxati_flash_spi_xfer(struct gfxati_flash *f, uint8_t in)
 	return out;
 }
 
+/* The JEDEC command decoder sees the low address bits: the unlock
+ * cycles arrive at 0x5555/0x2AAA (wide decode) or at 0x555/0x2AA
+ * (narrow decode, which flashprog's FEATURE_ADDR_2AA masking
+ * drives for the parts whose bus decodes that way). */
+#define PAR_ADDR_AA(addr)	(((addr) & 0x7ff) == 0x555)
+#define PAR_ADDR_55(addr)	(((addr) & 0x7ff) == 0x2aa)
+
+static void gfxati_par_page_commit(struct gfxati_flash *f)
+{
+	int i;
+	for (i = 0; i < f->par_load_count; i++)
+		f->mem[f->par_load_addr[i]] &= f->par_load_val[i];
+	f->par_load_count = 0;
+	f->program_mode = 0;
+}
+
 void gfxati_flash_parallel_write(struct gfxati_flash *f, uint32_t addr, uint8_t val)
 {
 	addr %= f->chip->size;
 
+	if (f->chip->bus == GFXATI_PARALLEL && f->program_mode &&
+	    f->par_load_count > 0 &&
+	    !((addr & ~(f->chip->page_size - 1)) ==
+	      (f->par_load_addr[0] & ~(f->chip->page_size - 1))))
+		gfxati_par_page_commit(f);
+
 	if (f->in_id_mode) {
-		if (addr == 0x5555 && val == 0xF0) {
+		if (PAR_ADDR_AA(addr) && val == 0xF0) {
 			f->in_id_mode = 0;
 			f->cmd_cycle = PAR_IDLE;
 		}
@@ -477,6 +499,63 @@ void gfxati_flash_parallel_write(struct gfxati_flash *f, uint32_t addr, uint8_t 
 	}
 
 	if (f->program_mode) {
+		if (f->chip->bus == GFXATI_PARALLEL &&
+		    f->chip->page_size <= 1) {
+			/* flashprog streams write chunks (the DB page_size
+			 * convention) after one unlock+A0; the real byte
+			 * programming families take each consecutive data
+			 * byte, and command decoding returns only on an
+			 * address discontinuity (the next unlock cycle's
+			 * jump) - mid-stream data cannot false-trigger */
+			if (!f->par_stream_live || addr == f->par_stream_last) {
+				f->mem[addr] &= val;
+				f->par_stream_last = addr + 1;
+				f->par_stream_live = 1;
+				return;
+			}
+			/* a pending unlock AA meets its pair here: the
+			 * command decoder acts on the COMPLETE pair, and
+			 * the stream truly ends */
+			if (f->par_unlock_pending) {
+				if (PAR_ADDR_55(addr) && val == 0x55) {
+					f->par_unlock_pending = 0;
+					f->program_mode = 0;
+					f->par_stream_live = 0;
+					f->cmd_cycle = PAR_CMD;
+					return;
+				}
+				/* unpaired: the pending AA was data */
+				f->mem[f->par_pending_addr] &= 0xAA;
+				f->par_unlock_pending = 0;
+			}
+			/* a discontinuous AA at the command address is
+			 * held pending (it may start the next unlock) */
+			if (PAR_ADDR_AA(addr) && val == 0xAA) {
+				f->par_unlock_pending = 1;
+				f->par_pending_addr = addr;
+				return;
+			}
+			/* any other discontinuous write is stream data
+			 * (the FF-skip in flashprog's page writer jumps
+			 * addresses) */
+			f->mem[addr] &= val;
+			f->par_stream_last = addr + 1;
+			return;
+		} else if (f->chip->bus == GFXATI_PARALLEL && f->chip->page_size > 1) {
+			/* page-load: accumulate within one page; a write
+			 * to another page (or a full page) commits */
+			uint32_t page = f->chip->page_size;
+			if (f->par_load_count > 0 &&
+			    (addr & ~(page - 1)) !=
+				    (f->par_load_addr[0] & ~(page - 1)))
+				gfxati_par_page_commit(f);
+			f->par_load_addr[f->par_load_count] = addr;
+			f->par_load_val[f->par_load_count] = val;
+			f->par_load_count++;
+			if (f->par_load_count >= (int)page)
+				gfxati_par_page_commit(f);
+			return;
+		}
 		f->mem[addr] &= val;
 		f->program_mode = 0;
 		return;
@@ -484,12 +563,21 @@ void gfxati_flash_parallel_write(struct gfxati_flash *f, uint32_t addr, uint8_t 
 
 	switch (f->cmd_cycle) {
 	case PAR_IDLE:
-		if (addr == 0x5555 && val == 0xAA) {
+		if (PAR_ADDR_AA(addr) && val == 0xAA) {
+			if (f->par_load_count > 0)
+				gfxati_par_page_commit(f);
 			f->cmd_cycle = PAR_UNLOCK1_55;
 		}
 		break;
 	case PAR_UNLOCK1_55:
-		if (addr == 0x2AAA && val == 0x55) {
+		if (f->par_unlock_pending && PAR_ADDR_55(addr) && val == 0x55) {
+			/* the pair completed: the stream truly ended */
+			f->par_unlock_pending = 0;
+			f->program_mode = 0;
+			f->par_stream_live = 0;
+			f->cmd_cycle = PAR_CMD;
+		} else if (!f->par_unlock_pending && PAR_ADDR_55(addr) &&
+			   val == 0x55) {
 			f->cmd_cycle = PAR_CMD;
 		} else {
 			f->cmd_cycle = PAR_IDLE;
@@ -503,6 +591,7 @@ void gfxati_flash_parallel_write(struct gfxati_flash *f, uint32_t addr, uint8_t 
 			break;
 		case 0xA0:
 			f->program_mode = 1;
+			f->par_stream_live = 0;
 			f->cmd_cycle = PAR_IDLE;
 			break;
 		case 0x80:
@@ -514,21 +603,21 @@ void gfxati_flash_parallel_write(struct gfxati_flash *f, uint32_t addr, uint8_t 
 		}
 		break;
 	case PAR_UNLOCK2_AA:
-		if (addr == 0x5555 && val == 0xAA) {
+		if (PAR_ADDR_AA(addr) && val == 0xAA) {
 			f->cmd_cycle = PAR_UNLOCK2_55;
 		} else {
 			f->cmd_cycle = PAR_IDLE;
 		}
 		break;
 	case PAR_UNLOCK2_55:
-		if (addr == 0x2AAA && val == 0x55) {
+		if (PAR_ADDR_55(addr) && val == 0x55) {
 			f->cmd_cycle = PAR_ERASE_CMD;
 		} else {
 			f->cmd_cycle = PAR_IDLE;
 		}
 		break;
 	case PAR_ERASE_CMD:
-		if (addr == 0x5555 && val == 0x10) {
+		if (PAR_ADDR_AA(addr) && val == 0x10) {
 			erase_block(f, 0, f->chip->size);
 		} else if (val == 0x30) {
 			erase_region(f, 0x30, addr);
@@ -543,6 +632,14 @@ void gfxati_flash_parallel_write(struct gfxati_flash *f, uint32_t addr, uint8_t 
 
 uint8_t gfxati_flash_parallel_read(struct gfxati_flash *f, uint32_t addr)
 {
+	/* A read while a page load pends closes the load window: the
+	 * real parts start their internal cycle on their own timing,
+	 * and any host observation (flashprog's toggle poll, the
+	 * verify pass) comes after the load ended. */
+	if (f->chip->bus == GFXATI_PARALLEL && f->program_mode &&
+	    f->par_load_count > 0)
+		gfxati_par_page_commit(f);
+
 	addr %= f->chip->size;
 
 	if (f->in_id_mode) {
@@ -595,11 +692,11 @@ const struct gfxati_flash_chip gfxati_flash_chips[] = {
 	{ "S25FL002D", 256 * 1024, 256, GFXATI_SPI, GFXATI_ID_RES_ONLY, { 0, 0, 0 }, 0, 0x11, GFXATI_ERASE_64K | GFXATI_ERASE_CHIP, 0 },
 	{ "S25FL004A", 512 * 1024, 256, GFXATI_SPI, GFXATI_ID_RDID, { 0x01, 0x02, 0x12 }, 3, 0, GFXATI_ERASE_64K | GFXATI_ERASE_CHIP, 0 },
 	{ "AT45DB011D", 128 * 1024, 256, GFXATI_SPI, GFXATI_ID_RDID, { 0x1F, 0x22, 0x00 }, 3, 0, GFXATI_ERASE_CHIP, GFXATI_Q_AT45 },
-	{ "AT29C256", 32 * 1024, 0, GFXATI_PARALLEL, GFXATI_ID_JEDEC_PARALLEL, { 0, 0, 0 }, 0, 0, GFXATI_ERASE_CHIP, 0 },
-	{ "AT29C512", 64 * 1024, 0, GFXATI_PARALLEL, GFXATI_ID_JEDEC_PARALLEL, { 0x1F, 0x5D, 0 }, 2, 0, GFXATI_ERASE_CHIP, 0 },
-	{ "AT29C010A", 128 * 1024, 0, GFXATI_PARALLEL, GFXATI_ID_JEDEC_PARALLEL, { 0x1F, 0xD5, 0 }, 2, 0, GFXATI_ERASE_CHIP, 0 },
-	{ "AT29C020", 256 * 1024, 0, GFXATI_PARALLEL, GFXATI_ID_JEDEC_PARALLEL, { 0x1F, 0xDA, 0 }, 2, 0, GFXATI_ERASE_CHIP, 0 },
-	{ "AT29C040A", 512 * 1024, 0, GFXATI_PARALLEL, GFXATI_ID_JEDEC_PARALLEL, { 0x1F, 0xA4, 0 }, 2, 0, GFXATI_ERASE_CHIP, 0 },
+	{ "AT29C256", 32 * 1024, 64, GFXATI_PARALLEL, GFXATI_ID_JEDEC_PARALLEL, { 0, 0, 0 }, 0, 0, GFXATI_ERASE_CHIP, 0 },
+	{ "AT29C512", 64 * 1024, 128, GFXATI_PARALLEL, GFXATI_ID_JEDEC_PARALLEL, { 0x1F, 0x5D, 0 }, 2, 0, GFXATI_ERASE_CHIP, 0 },
+	{ "AT29C010A", 128 * 1024, 128, GFXATI_PARALLEL, GFXATI_ID_JEDEC_PARALLEL, { 0x1F, 0xD5, 0 }, 2, 0, GFXATI_ERASE_CHIP, 0 },
+	{ "AT29C020", 256 * 1024, 256, GFXATI_PARALLEL, GFXATI_ID_JEDEC_PARALLEL, { 0x1F, 0xDA, 0 }, 2, 0, GFXATI_ERASE_CHIP, 0 },
+	{ "AT29C040A", 512 * 1024, 256, GFXATI_PARALLEL, GFXATI_ID_JEDEC_PARALLEL, { 0x1F, 0xA4, 0 }, 2, 0, GFXATI_ERASE_CHIP, 0 },
 	{ "AT49F512", 64 * 1024, 0, GFXATI_PARALLEL, GFXATI_ID_JEDEC_PARALLEL, { 0, 0, 0 }, 0, 0, GFXATI_ERASE_CHIP, 0 },
 	{ "AT49F001N", 128 * 1024, 0, GFXATI_PARALLEL, GFXATI_ID_JEDEC_PARALLEL, { 0x1F, 0x05, 0 }, 2, 0, GFXATI_ERASE_CHIP, 0 },
 	{ "AT49F001T", 128 * 1024, 0, GFXATI_PARALLEL, GFXATI_ID_JEDEC_PARALLEL, { 0x1F, 0x04, 0 }, 2, 0, GFXATI_ERASE_CHIP, 0 },

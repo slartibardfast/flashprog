@@ -2096,6 +2096,142 @@ const struct flashchip flashchips[] = {
 	},
 
 	{
+		/* The atiflash-catalog AT49F001N (bottom boot); grounded by
+		 * the af349 PARALLEL record (the 1F 04/05 pair) and the
+		 * Atmel family sheets. Untested until real hardware
+		 * asserts. */
+		.vendor		= "Atmel",
+		.name		= "AT49F001N",
+		.bustype	= BUS_PARALLEL,
+		.id.type	= ID_JEDEC,
+		.id.manufacture	= ATMEL_ID,
+		.id.model	= 0x04,
+		.total_size	= 128,
+		.page_size	= 128,
+		.feature_bits	= FEATURE_EITHER_RESET,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= 10000,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {128 * 1024, 1} },
+				.block_erase = erase_chip_block_jedec,
+			}
+		},
+		.write		= write_jedec,
+		.read		= read_memmapped,
+		.voltage	= {4500, 5500},
+	},
+
+	{
+		/* The atiflash-catalog AT49F001T (top boot). */
+		.vendor		= "Atmel",
+		.name		= "AT49F001T",
+		.bustype	= BUS_PARALLEL,
+		.id.type	= ID_JEDEC,
+		.id.manufacture	= ATMEL_ID,
+		.id.model	= 0x05,
+		.total_size	= 128,
+		.page_size	= 128,
+		.feature_bits	= FEATURE_EITHER_RESET,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= 10000,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {128 * 1024, 1} },
+				.block_erase = erase_chip_block_jedec,
+			}
+		},
+		.write		= write_jedec,
+		.read		= read_memmapped,
+		.voltage	= {4500, 5500},
+	},
+
+	{
+		/* The atiflash-catalog AT49LV010 (the 3V sibling). */
+		.vendor		= "Atmel",
+		.name		= "AT49LV010",
+		.bustype	= BUS_PARALLEL,
+		.id.type	= ID_JEDEC,
+		.id.manufacture	= ATMEL_ID,
+		.id.model	= 0x17,
+		.total_size	= 128,
+		.page_size	= 128,
+		.feature_bits	= FEATURE_EITHER_RESET,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= 10000,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {128 * 1024, 1} },
+				.block_erase = erase_chip_block_jedec,
+			}
+		},
+		.write		= write_jedec,
+		.read		= read_memmapped,
+		.voltage	= {3000, 3600},
+	},
+
+	{
+		/* The atiflash-catalog SST39SF010 (4KB sectors; the 39SF
+		 * family grounding is archived). */
+		.vendor		= "SST",
+		.name		= "SST39SF010",
+		.bustype	= BUS_PARALLEL,
+		.id.type	= ID_JEDEC,
+		.id.manufacture	= SST_ID,
+		.id.model	= 0xB5,
+		.total_size	= 128,
+		.page_size	= 4096,
+		.feature_bits	= FEATURE_EITHER_RESET,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= 1,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {4 * 1024, 32} },
+				.block_erase = erase_block_jedec,
+			}, {
+				.eraseblocks = { {128 * 1024, 1} },
+				.block_erase = erase_chip_block_jedec,
+			}
+		},
+		.write		= write_jedec,
+		.read		= read_memmapped,
+		.voltage	= {4500, 5500},
+	},
+
+	{
+		/* The atiflash-catalog SST45LF010 (the FWH-quirk part the
+		 * model flags). */
+		.vendor		= "SST",
+		.name		= "SST45LF010",
+		.bustype	= BUS_PARALLEL,
+		.id.type	= ID_JEDEC,
+		.id.manufacture	= SST_ID,
+		.id.model	= 0x42,
+		.total_size	= 128,
+		.page_size	= 4096,
+		.feature_bits	= FEATURE_EITHER_RESET,
+		.tested		= TEST_UNTESTED,
+		.probe_timing	= 1,
+		.block_erasers	=
+		{
+			{
+				.eraseblocks = { {4 * 1024, 32} },
+				.block_erase = erase_block_jedec,
+			}, {
+				.eraseblocks = { {128 * 1024, 1} },
+				.block_erase = erase_chip_block_jedec,
+			}
+		},
+		.write		= write_jedec,
+		.read		= read_memmapped,
+		.voltage	= {3000, 3600},
+	},
+
+	{
 		/* The atiflash-catalog MX25L512 (C2 20 10); grounded by the
 		 * archived Macronix sheet (manufacturer C2, type 20,
 		 * capacity 10). Untested until real hardware asserts. */
