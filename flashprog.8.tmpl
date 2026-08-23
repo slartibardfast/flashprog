@@ -952,6 +952,18 @@ the flash itself, never by the strap (OEM boards misstrapped their
 ROMs often enough that the original tools carried manual overrides
 for exactly this reason).
 .SS
+.BR "gfxati: operational cautions "
+.IP
+Like every PCI programmer, this driver writes PCI configuration
+space (the ROM BAR address and enable) directly; stop the console
+or framebuffer driver from touching the card before flashing \(em
+switch to a text console or SSH on real hardware, the discipline
+GPU flashers have always used. Flashing the wrong image to a video
+card's ROM can leave the board unbootable; the SSID guard and the
+layout recipe above exist to keep the card's identity and strap
+bytes intact, and a ROM dump taken first (\fB\-r\fR) is the
+recovery image.
+.SS
 .BR "gfxati: the SSID guard "
 .IP
 The card's 16-bit subsystem ID lives at ROM offset 0x1A. A write
