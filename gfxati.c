@@ -52,8 +52,6 @@
 #include "platform/pci.h"
 #include "spi.h"
 
-#define PCI_VENDOR_ID_ATI		0x1002
-
 #define GFXATI_MM_INDEX			0xA0
 #define GFXATI_MM_DATA			0xA4
 #define GFXATI_SEPROM_CNTL1_INDEX	0x1C0
@@ -63,7 +61,6 @@
 #define GFXATI_CS_BIT			0x400
 #define GFXATI_BUSY_BITS		0x1100
 
-#define GFXATI_WINDOW_ARM		0x09000000
 #define GFXATI_WIN_PROGRAM		0x09000000	/* sub 0x000/0x200 */
 #define GFXATI_WIN_STATUS		0x09000010	/* sub 0x010 */
 #define GFXATI_WIN_TRIGGER		0x09000001	/* any other sub */
@@ -266,9 +263,11 @@ static int gfxati_spi_command(const struct spi_master *mst, unsigned int writecn
  * freely; only writing an identity onto a blank-stamped ROM needs
  * forcing. flashprog's --force is the single override.
  *
- * ROM offsets 0x7A/0x7B are the card's strap bytes and must survive
- * every write - the onboard values are restored into whatever image
- * is written. */
+ * ROM offsets 0x7A/0x7B are the card's strap bytes. They are NOT
+ * silently rewritten: this programmer writes and verifies exactly
+ * the image given, and preservation is flashprog's layout mechanism
+ * (a region excluding 0x7A-0x7B; the man page carries the recipe).
+ */
 #define GFXATI_SSID_OFF		0x1A
 #define GFXATI_PRESERVE1_OFF	0x7A
 #define GFXATI_PRESERVE2_OFF	0x7B
@@ -299,8 +298,6 @@ static void gfxati_capture_identity(void)
 static int gfxati_spi_write_256(struct flashctx *flash, const uint8_t *buf,
 				unsigned int start, unsigned int len)
 {
-	const uint8_t *cur = buf;
-
 	if (start <= GFXATI_SSID_OFF && start + len > GFXATI_PRESERVE2_OFF) {
 		uint16_t onboard_ssid, image_ssid;
 
@@ -330,7 +327,7 @@ static int gfxati_spi_write_256(struct flashctx *flash, const uint8_t *buf,
 		 * erase and write (the docs carry the recipe). */
 	}
 
-	return default_spi_write_256(flash, cur, start, len);
+	return default_spi_write_256(flash, buf, start, len);
 }
 
 static int gfxati_spi_read(struct flashctx *flash, uint8_t *buf,
