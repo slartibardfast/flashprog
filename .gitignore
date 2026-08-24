@@ -26,4 +26,6 @@
 /states/
 /gfxati-card/gfxati_card_test
 /gfxati-card/probe/probe.elf
-gfxati-card/gfxati_card_test
+
+# Python bytecode from the rig tooling
+__pycache__/
